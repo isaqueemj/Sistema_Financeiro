@@ -1,343 +1,184 @@
-// relatorios.js
-// Lógica para carregar relatórios, renderizar gráficos Dark Mode e exportar PDF de GASTOS
+// Caminho: web/js/dashboard.js
+function formatarMoedaBRL(valor) {
+    return Number(valor || 0).toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL"
+    });
+}
 
-document.addEventListener("DOMContentLoaded", function () {
-    carregarNomeDoBanco();
-    carregarRelatorios();
-    
-    // Listener para o botão de PDF
-    const btnPDF = document.getElementById("btnGerarPDF");
-    if (btnPDF) {
-        btnPDF.addEventListener("click", gerarPDF);
+document.addEventListener("DOMContentLoaded", () => {
+    carregarStatsDashboard();
+
+    // Sincronização em tempo real quando uma transação é feita no Chat IA (mesma aba ou outra aba)
+    window.addEventListener("storage", (e) => {
+        if (e.key === "ultima_atualizacao_financeira") {
+            carregarStatsDashboard();
+        }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            carregarStatsDashboard();
+        }
+    });
+
+    // Polling leve a cada 6 segundos para refletir mensagens vindas do celular/WhatsApp
+    setInterval(carregarStatsDashboard, 6000);
+
+    const btnRefresh = document.getElementById("btn-refresh-dash");
+    if (btnRefresh) {
+        btnRefresh.addEventListener("click", carregarStatsDashboard);
+    }
+
+    const formTransacao = document.getElementById("form-nova-transacao");
+    if (formTransacao) {
+        formTransacao.addEventListener("submit", registrarTransacaoManual);
+    }
+
+    const btnLogout = document.getElementById("btn-logout");
+    if (btnLogout) {
+        btnLogout.addEventListener("click", async () => {
+            await fetch("/api/auth/logout", { method: "POST" });
+            localStorage.removeItem("usuario_logado");
+            window.location.href = "/";
+        });
     }
 });
 
-let graficoPizza = null;
-let graficoBarra = null;
-let graficoCategoria = null;
-
-// Configuração de Cores para o Tema Escuro
-const chartColors = {
-    text: '#94a3b8',
-    grid: '#334155',
-    green: '#10b981',
-    red: '#ef4444',
-    blue: '#3b82f6',
-    blueHover: '#60a5fa'
-};
-
-// Configuração Global do Chart.js para Dark Mode
-Chart.defaults.color = chartColors.text;
-Chart.defaults.borderColor = chartColors.grid;
-
-async function carregarRelatorios() {
+async function carregarStatsDashboard() {
     try {
-        const response = await fetch('/api/transacoes');
-        if (!response.ok) throw new Error("Erro ao buscar dados do servidor.");
+        const res = await fetch("/api/dashboard/stats", { cache: "no-store" });
+        if (res.status === 401) {
+            window.location.href = "/";
+            return;
+        }
+        const data = await res.json();
+        if (!data.sucesso) return;
 
-        const transacoes = await response.json();
+        if (data.usuario && data.usuario.nome) {
+            const elNome = document.getElementById("dash-user-name");
+            if (elNome) elNome.textContent = `Olá, ${data.usuario.nome}`;
+        }
 
-        let totalReceitas = 0;
-        let totalDespesas = 0;
-        let maiorReceita = 0;
-        let maiorDespesa = 0;
-        
-        let despesasPorCategoria = {};
-        let receitasPorMes = {};
-        let despesasPorMes = {};
-
-        const formatarMoeda = (valor) => new Intl.NumberFormat('pt-BR', { 
-            style: 'currency', 
-            currency: 'BRL' 
-        }).format(valor);
-
-        const tbody = document.getElementById('statementTableBody');
-        if (!tbody) return;
-        
-        let linhasTabela = '';
-
-        transacoes.forEach(t => {
-            const valor = Number(t.valor);
-            const tipo = t.tipo.toLowerCase();
-            const categoria = t.categoria || "Outros";
-            
-            // Tratamento de Data para os gráficos (YYYY-MM)
-            const mesAno = t.data ? t.data.substring(0, 7) : "Indefinido";
-            
-            // Tratamento corrigido de Data e Hora para a Tabela (DD/MM/YYYY às HH:MM)
-            const dataFormatadaParaTabela = formatarDataHora(t.data);
-
-            if (tipo === 'receita') {
-                totalReceitas += valor;
-                if (valor > maiorReceita) maiorReceita = valor;
-                receitasPorMes[mesAno] = (receitasPorMes[mesAno] || 0) + valor;
-                
-                linhasTabela += criarLinhaTabela(dataFormatadaParaTabela, t.descricao, categoria, 'Receita', valor, formatarMoeda);
-            } else if (tipo === 'despesa') {
-                totalDespesas += valor;
-                if (valor > maiorDespesa) maiorDespesa = valor;
-                despesasPorCategoria[categoria] = (despesasPorCategoria[categoria] || 0) + valor;
-                despesasPorMes[mesAno] = (despesasPorMes[mesAno] || 0) + valor;
-                
-                linhasTabela += criarLinhaTabela(dataFormatadaParaTabela, t.descricao, categoria, 'Despesa', valor, formatarMoeda);
-            }
-        });
-
-        tbody.innerHTML = linhasTabela || `<tr><td colspan="5" style="text-align: center;">Nenhuma movimentação registrada.</td></tr>`;
-
-        // Cálculos Finais
-        const saldoAtual = totalReceitas - totalDespesas;
-        const totalTransacoesDespesa = Object.values(despesasPorCategoria).length > 0 ? 
-              transacoes.filter(t => t.tipo.toLowerCase() === 'despesa').length : 1; 
-        const mediaGastos = totalDespesas / (totalTransacoesDespesa || 1);
-
-        // Atualiza os Textos no DOM
-        const elReceitas = document.getElementById("reportReceitas");
-        const elDespesas = document.getElementById("reportDespesas");
-        if (elReceitas) elReceitas.textContent = formatarMoeda(totalReceitas);
-        if (elDespesas) elDespesas.textContent = formatarMoeda(totalDespesas);
-        
-        const elSaldo = document.getElementById("reportSaldo");
-        if (elSaldo) elSaldo.textContent = formatarMoeda(saldoAtual);
-        
-        // Atualiza Métricas Extras
-        const elMaiorRec = document.getElementById("maiorReceita");
-        const elMaiorDesp = document.getElementById("maiorDespesa");
-        const elMediaGastos = document.getElementById("mediaGastos");
-
-        if (elMaiorRec) elMaiorRec.textContent = formatarMoeda(maiorReceita);
-        if (elMaiorDesp) elMaiorDesp.textContent = formatarMoeda(maiorDespesa);
-        if (elMediaGastos) elMediaGastos.textContent = formatarMoeda(mediaGastos);
-
-        // Renderiza Gráficos
-        renderizarGraficoPizza(totalReceitas, totalDespesas);
-        renderizarGraficoBarra(receitasPorMes, despesasPorMes);
-        renderizarGraficoCategoria(despesasPorCategoria);
-
-    } catch (error) {
-        console.error("Erro ao carregar relatórios:", error);
+        renderizarCardsResumo(data.resumo);
+        renderizarCategorias(data.resumo.despesas_por_categoria, data.resumo.total_despesas);
+        renderizarTabelaTransacoes(data.transacoes);
+    } catch (err) {
+        console.error("Erro ao sincronizar Dashboard:", err);
     }
 }
 
-function criarLinhaTabela(data, desc, cat, tipo, valor, formatador) {
-    const isReceita = tipo === 'Receita';
-    const badgeClass = isReceita ? 'badge income' : 'badge expense';
-    const valorCor = isReceita ? 'text-green' : 'text-red';
-    const rowClass = isReceita ? 'linha-receita' : 'linha-despesa'; 
-    
-    return `
-        <tr class="${rowClass}">
-            <td>${data}</td>
-            <td><strong>${desc}</strong></td>
-            <td>${cat}</td>
-            <td><span class="${badgeClass}">${tipo}</span></td>
-            <td class="align-right ${valorCor}"><strong>${formatador(valor)}</strong></td>
-        </tr>
-    `;
+function renderizarCardsResumo(resumo) {
+    const elSaldo = document.getElementById("metric-saldo");
+    const elReceitas = document.getElementById("metric-receitas");
+    const elDespesas = document.getElementById("metric-despesas");
+    const elStatus = document.getElementById("metric-status-orca");
+    const elQtd = document.getElementById("metric-qtd-lancamentos");
+
+    if (elSaldo) {
+        elSaldo.textContent = formatarMoedaBRL(resumo.saldo);
+        elSaldo.className = `metric-value ${resumo.saldo < 0 ? "text-red" : "text-green"}`;
+    }
+    if (elReceitas) elReceitas.textContent = formatarMoedaBRL(resumo.total_receitas);
+    if (elDespesas) elDespesas.textContent = formatarMoedaBRL(resumo.total_despesas);
+
+    if (elStatus) {
+        elStatus.textContent = resumo.saldo < 0
+            ? "⚠️ Atenção: Saldo negativo no período"
+            : "✅ Orçamento com saldo positivo";
+    }
+    if (elQtd) {
+        elQtd.textContent = `${resumo.total_lancamentos || 0} movimentações registradas`;
+    }
 }
 
-function formatarDataHora(dataString) {
-    if (!dataString) return "-";
-    
-    // Divide a data e a hora salvas no banco (ex: "2026-09-02 14:35:10")
-    const partes = dataString.split(/[\sT]/);
-    const dataPart = partes[0]; // "2026-09-02"
-    let horaPart = partes[1] ? partes[1].substring(0, 5) : ""; // "14:35"
+function renderizarCategorias(categorias, totalDespesas) {
+    const container = document.getElementById("categorias-container");
+    if (!container) return;
 
-    // Organiza a data de YYYY-MM-DD para DD/MM/YYYY
-    const dArray = dataPart.split('-');
-    const dataFormatada = dArray.length === 3 ? `${dArray[2]}/${dArray[1]}/${dArray[0]}` : dataPart;
-
-    // Retorna exatamente o horário fixo que foi gravado no banco
-    return horaPart ? `${dataFormatada} às ${horaPart}` : dataFormatada;
-}
-
-async function carregarNomeDoBanco() {
-    const usuarioLogado = localStorage.getItem("financeControl_user");
-    const spanNome = document.getElementById("loggedUserName");
-
-    if (!spanNome) return;
-
-    if (usuarioLogado) {
-        try {
-            const response = await fetch(`/api/usuario/${usuarioLogado}`);
-            if (response.ok) {
-                const dados = await response.json();
-                spanNome.textContent = `Olá, ${dados.nome}`;
-                localStorage.setItem("financeControl_userName", dados.nome);
-                return;
-            }
-        } catch (error) {
-            console.error("Erro ao buscar nome do banco:", error);
-        }
+    if (!categorias || categorias.length === 0) {
+        container.innerHTML = `<p class="empty-msg">Nenhuma despesa categorizada ainda.</p>`;
+        return;
     }
 
-    const nomeSalvo = localStorage.getItem("financeControl_userName") || "Usuário";
-    spanNome.textContent = `Olá, ${nomeSalvo}`;
-}
-
-function renderizarGraficoPizza(receitas, despesas) {
-    const canvas = document.getElementById('pizzaChart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (graficoPizza) graficoPizza.destroy();
-
-    graficoPizza = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: ['Receitas', 'Despesas'],
-            datasets: [{
-                data: [receitas, despesas],
-                backgroundColor: [chartColors.green, chartColors.red],
-                borderWidth: 0,
-                hoverOffset: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '70%',
-            plugins: { legend: { position: 'bottom', labels: { padding: 20 } } }
-        }
-    });
-}
-
-function renderizarGraficoBarra(receitasMes, despesasMes) {
-    const canvas = document.getElementById('barChart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (graficoBarra) graficoBarra.destroy();
-
-    const mesesUnicos = [...new Set([...Object.keys(receitasMes), ...Object.keys(despesasMes)])].sort();
-    const dadosReceitas = mesesUnicos.map(m => receitasMes[m] || 0);
-    const dadosDespesas = mesesUnicos.map(m => despesasMes[m] || 0);
-
-    const labelsFormatados = mesesUnicos.map(m => {
-        const partes = m.split('-');
-        return partes.length === 2 ? `${partes[1]}/${partes[0]}` : m;
-    });
-
-    graficoBarra = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labelsFormatados,
-            datasets: [
-                { label: 'Receitas', data: dadosReceitas, backgroundColor: chartColors.green, borderRadius: 4 },
-                { label: 'Despesas', data: dadosDespesas, backgroundColor: chartColors.red, borderRadius: 4 }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, grid: { color: chartColors.grid } },
-                x: { grid: { display: false } }
-            },
-            plugins: { legend: { position: 'top' } }
-        }
-    });
-}
-
-function renderizarGraficoCategoria(categoriasObj) {
-    const canvas = document.getElementById('categoryChart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (graficoCategoria) graficoCategoria.destroy();
-
-    const categoriasOrdenadas = Object.entries(categoriasObj).sort((a, b) => b[1] - a[1]);
-    const categorias = categoriasOrdenadas.map(c => c[0]);
-    const valores = categoriasOrdenadas.map(c => c[1]);
-
-    graficoCategoria = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: categorias.length > 0 ? categorias : ['Nenhuma despesa'],
-            datasets: [{
-                label: 'Gastos por Categoria (R$)',
-                data: valores.length > 0 ? valores : [0],
-                backgroundColor: chartColors.blue,
-                hoverBackgroundColor: chartColors.blueHover,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, grid: { color: chartColors.grid } },
-                x: { grid: { display: false } }
-            },
-            plugins: { legend: { display: false } }
-        }
-    });
-}
-
-function gerarPDF() {
-    const elementoRelatorio = document.getElementById('areaRelatorioPDF');
-    if (!elementoRelatorio) return;
-    
-    const dataEmissao = new Date().toLocaleDateString('pt-BR');
-    const pdfHeader = document.querySelector('.pdf-header');
-    
-    if (pdfHeader) {
-        pdfHeader.innerHTML = `
-            <h2 style="color: white; margin-bottom: 5px;">Relatório de Despesas</h2>
-            <p style="color: #94a3b8; font-size: 14px;">Data de emissão: ${dataEmissao}</p>
+    container.innerHTML = categorias.map((c) => {
+        const perc = totalDespesas > 0 ? Math.min(100, (c.total / totalDespesas) * 100) : 0;
+        return `
+            <div class="cat-item">
+                <div class="cat-header">
+                    <span>${c.categoria}</span>
+                    <strong>${formatarMoedaBRL(c.total)} (${perc.toFixed(0)}%)</strong>
+                </div>
+                <div class="cat-bar-bg">
+                    <div class="cat-bar-fill" style="width: ${perc}%;"></div>
+                </div>
+            </div>
         `;
-        pdfHeader.style.display = 'block';
+    }).join("");
+}
+
+function renderizarTabelaTransacoes(transacoes) {
+    const tbody = document.getElementById("tabela-transacoes-body");
+    if (!tbody) return;
+
+    if (!transacoes || transacoes.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">Nenhuma movimentação registrada. Experimente digitar no Assistente IA: "Comprei uma camiseta de 60".</td></tr>`;
+        return;
     }
 
-    const linhasReceita = document.querySelectorAll('.linha-receita');
-    linhasReceita.forEach(linha => linha.style.display = 'none');
+    tbody.innerHTML = transacoes.map((t) => {
+        const ehReceita = t.tipo === "receita";
+        const dataFormatada = t.data_transacao
+            ? new Date(t.data_transacao.replace(" ", "T")).toLocaleDateString("pt-BR")
+            : "-";
+        return `
+            <tr>
+                <td>${dataFormatada}</td>
+                <td>${t.descricao || "-"}</td>
+                <td>${t.categoria}</td>
+                <td>
+                    <span class="badge-tipo ${ehReceita ? "badge-receita" : "badge-despesa"}">
+                        ${ehReceita ? "Entrada" : "Saída"}
+                    </span>
+                </td>
+                <td class="${ehReceita ? "text-green" : "text-red"}" style="font-weight: 700;">
+                    ${ehReceita ? "+" : "-"} ${formatarMoedaBRL(t.valor)}
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
 
-    const cardReceita = document.querySelector('.card.income');
-    const cardSaldo = document.querySelector('.card.balance');
-    const maiorRecEl = document.getElementById('maiorReceita');
-    const metricMaiorReceita = maiorRecEl ? maiorRecEl.parentElement : null;
-    
-    if (cardReceita) cardReceita.style.display = 'none';
-    if (cardSaldo) cardSaldo.style.display = 'none';
-    if (metricMaiorReceita) metricMaiorReceita.style.display = 'none';
+async function registrarTransacaoManual(e) {
+    e.preventDefault();
+    const tipo = document.getElementById("trans-tipo").value;
+    const valor = parseFloat(document.getElementById("trans-valor").value);
+    const categoria = document.getElementById("trans-categoria").value;
+    const descricao = document.getElementById("trans-descricao").value.trim();
+    const alertBox = document.getElementById("dash-alert");
 
-    const opt = {
-        margin:       10,
-        filename:     `Relatorio_Despesas_${dataEmissao.replace(/\//g, '-')}.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0f172a' },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
+    try {
+        const res = await fetch("/api/transacoes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tipo, valor, categoria, descricao, moeda: "BRL" })
+        });
+        const data = await res.json();
+        alertBox.style.display = "block";
 
-    const btn = document.getElementById('btnGerarPDF');
-    const textoOriginal = btn ? btn.innerText : '';
-    if (btn) {
-        btn.innerText = "⏳ Gerando...";
-        btn.disabled = true;
+        if (res.ok && data.sucesso) {
+            alertBox.className = "alert-box alert-success";
+            alertBox.textContent = data.alerta || "Movimentação registrada com sucesso!";
+            document.getElementById("form-nova-transacao").reset();
+            localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
+            carregarStatsDashboard();
+        } else {
+            alertBox.className = "alert-box alert-error";
+            alertBox.textContent = data.erro || "Erro ao salvar transação.";
+        }
+    } catch (err) {
+        alertBox.style.display = "block";
+        alertBox.className = "alert-box alert-error";
+        alertBox.textContent = "Erro de conexão com o servidor.";
     }
-
-    html2pdf().set(opt).from(elementoRelatorio).save().then(() => {
-        if (pdfHeader) pdfHeader.style.display = 'none';
-        linhasReceita.forEach(linha => linha.style.display = '');
-        if (cardReceita) cardReceita.style.display = 'flex';
-        if (cardSaldo) cardSaldo.style.display = 'flex';
-        if (metricMaiorReceita) metricMaiorReceita.style.display = 'flex';
-
-        if (btn) {
-            btn.innerText = textoOriginal;
-            btn.disabled = false;
-        }
-    }).catch(err => {
-        console.error("Erro ao gerar PDF:", err);
-        alert("Houve um erro ao gerar o PDF.");
-        
-        if (pdfHeader) pdfHeader.style.display = 'none';
-        linhasReceita.forEach(linha => linha.style.display = '');
-        if (cardReceita) cardReceita.style.display = 'flex';
-        if (cardSaldo) cardSaldo.style.display = 'flex';
-        if (metricMaiorReceita) metricMaiorReceita.style.display = 'flex';
-
-        if (btn) {
-            btn.innerText = textoOriginal;
-            btn.disabled = false;
-        }
-    });
 }
