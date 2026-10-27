@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinanceControl - Assistente IA</title>
+  <link rel="stylesheet" href="../css/assistente.css">
+</head>
+
+<body class="dark-theme">
+  <aside class="sidebar">
+    <h2>FinanceControl</h2>
+    <nav>
+      <a href="dashboard.html">📊 Dashboard</a>
+      <a href="configuracoes.html">⚙️ Configurações</a>
+      <a href="assistente.html" class="active">🤖 Assistente IA</a>
+    </nav>
+  </aside>
+
+  <main class="main-content">
+    <header class="topbar">
+      <div>
+        <h1>Assistente Financeiro IA</h1>
+        <p class="subtitle">Tire dúvidas e peça análises sobre suas finanças</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="loggedUserName">Olá, Usuário</span>
+      </div>
+    </header>
+
+    <section class="chat-container">
+      <div id="chatMessages" class="chat-messages">
+        <div class="message bot">
+          <div class="message-content">
+            Olá! Sou o seu assistente inteligente integrado ao FinanceControl. Como posso ajudar com as suas finanças hoje?
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input-area">
+        <form id="chatForm">
+          <input type="text" id="userInput" placeholder="Digite sua pergunta para a IA..." autocomplete="off">
+          <button type="submit" class="btn-primary">Enviar</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <script src="../js/assistente.js"></script>
+</body>
+</html>

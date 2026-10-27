@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>FinanceControl - Login</title>
+
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  body {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #020617, #0f172a, #1e293b);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .login-container {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(15, 23, 42, 0.9);
+    backdrop-filter: blur(10px);
+    padding: 40px;
+    border-radius: 20px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    color: #e2e8f0;
+  }
+
+  .login-container h1 {
+    text-align: center;
+    margin-bottom: 10px;
+    font-size: 30px;
+    color: #38bdf8;
+  }
+
+  .login-container p {
+    text-align: center;
+    color: #94a3b8;
+    margin-bottom: 30px;
+    font-size: 15px;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #cbd5f5;
+    font-size: 14px;
+  }
+
+  input {
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    font-size: 15px;
+    outline: none;
+    background: #020617;
+    color: #e2e8f0;
+    transition: 0.3s;
+  }
+
+  input::placeholder {
+    color: #64748b;
+  }
+
+  input:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+  }
+
+  button {
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    border: none;
+    background: linear-gradient(90deg, #06b6d4, #3b82f6);
+    color: white;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+
+  button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(59, 130, 246, 0.4);
+  }
+
+  .error-message {
+    color: #f87171;
+    margin-top: 12px;
+    text-align: center;
+    display: none;
+    font-size: 14px;
+  }
+</style>
+
+</head>
+
+<body>
+
+
+  <script src="js/auth.js"></script>
+</body>
+</html>

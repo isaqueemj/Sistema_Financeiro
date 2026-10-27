@@ -1,0 +1,207 @@
+/* configuracoes.css - Dark Theme Integrado */
+
+:root {
+  --bg-dark: #0f172a;
+  --bg-card: #1e293b;
+  --bg-hover: #334155;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --color-green: #10b981;
+  --color-red: #ef4444;
+  --color-blue: #3b82f6;
+  --border-color: #334155;
+  --font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body.dark-theme {
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: var(--font-family);
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar (Padrão do Sistema) */
+.sidebar {
+  width: 250px;
+  background-color: var(--bg-card);
+  padding: 20px;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar h2 {
+  color: var(--text-main);
+  font-size: 1.5rem;
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar nav a {
+  text-decoration: none;
+  color: var(--text-muted);
+  padding: 12px 15px;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.sidebar nav a:hover, .sidebar nav a.active {
+  background-color: var(--color-blue);
+  color: #fff;
+}
+
+/* Main Content & Topbar */
+.main-content {
+  flex: 1;
+  padding: 30px 40px;
+  overflow-y: auto;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 40px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.topbar h1 {
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+.topbar .subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 5px;
+}
+
+#loggedUserName {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* Settings Cards */
+.settings-card {
+  background-color: var(--bg-card);
+  padding: 30px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 30px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.settings-card h2 {
+  font-size: 1.2rem;
+  color: var(--text-main);
+  margin-bottom: 25px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+}
+
+/* Forms e Inputs */
+.input-group {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 400px;
+}
+
+.input-group label {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.input-group input {
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 12px 15px;
+  border-radius: 6px;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.input-group input:focus {
+  border-color: var(--color-blue);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+/* Botões */
+.btn-primary {
+  background-color: var(--color-blue);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.btn-primary:hover {
+  background-color: #2563eb;
+}
+
+/* Área Danger (Exclusão/Logout) */
+.settings-card.danger {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.settings-card.danger h2 {
+  color: var(--color-red);
+  border-bottom-color: rgba(239, 68, 68, 0.2);
+}
+
+.action-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.action-info h3 {
+  font-size: 1rem;
+  color: var(--text-main);
+  margin-bottom: 5px;
+}
+
+.action-info p {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.btn-danger {
+  background-color: transparent;
+  color: var(--color-red);
+  border: 1px solid var(--color-red);
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+}
+
+.btn-danger:hover {
+  background-color: var(--color-red);
+  color: #fff;
+}

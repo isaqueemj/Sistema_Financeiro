@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinanceControl - Relatórios Avançados</title>
+  
+  <link rel="stylesheet" href="../css/dashboard.css">
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- HTML2PDF para geração do extrato -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+
+<body class="dark-theme">
+  <aside class="sidebar">
+    <h2>FinanceControl</h2>
+    <nav>
+      <a href="dashboard.html" class="active">📊 Dashboard</a>
+      <a href="configuracoes.html">⚙️ Configurações</a>
+      <a href="assistente.html">🤖 Assistente IA</a>
+    </nav>
+  </aside>
+
+  <main class="main-content">
+    <header class="topbar">
+      <div>
+        <h1>Relatórios e Extratos</h1>
+        <p class="subtitle">Análise detalhada das suas finanças</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="loggedUserName">Olá, Isaque</span>
+
+      </div>
+    </header>
+
+    <!-- Tudo dentro desta div sairá no PDF -->
+    <div id="areaRelatorioPDF">
+      
+      <!-- Cabeçalho visível apenas no PDF -->
+      <div class="pdf-header" style="display: none;">
+        <h2>Extrato Financeiro - FinanceControl</h2>
+        <p id="dataEmissaoPdf"></p>
+      </div>
+
+      <section class="summary-cards">
+        <div class="card income">
+          <div class="card-icon">↗️</div>
+          <div class="card-info">
+            <h3>Receitas Totais</h3>
+            <p id="reportReceitas">R$ 0,00</p>
+          </div>
+        </div>
+
+        <div class="card expense">
+          <div class="card-icon">↘️</div>
+          <div class="card-info">
+            <h3>Despesas Totais</h3>
+            <p id="reportDespesas">R$ 0,00</p>
+          </div>
+        </div>
+
+        <div class="card balance">
+          <div class="card-icon">💰</div>
+          <div class="card-info">
+            <h3>Saldo Atual</h3>
+            <p id="reportSaldo">R$ 0,00</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="metrics-cards">
+        <div class="metric">
+          <span>Maior Receita:</span>
+          <strong id="maiorReceita" class="text-green">R$ 0,00</strong>
+        </div>
+        <div class="metric">
+          <span>Maior Despesa:</span>
+          <strong id="maiorDespesa" class="text-red">R$ 0,00</strong>
+        </div>
+        <div class="metric">
+          <span>Média de Gastos:</span>
+          <strong id="mediaGastos">R$ 0,00</strong>
+        </div>
+      </section>
+
+      <section class="charts-grid">
+        <div class="chart-card">
+          <h2>Distribuição Geral</h2>
+          <div class="canvas-container">
+            <canvas id="pizzaChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <h2>Fluxo Mensal</h2>
+          <div class="canvas-container">
+            <canvas id="barChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card full">
+          <h2>Despesas por Categoria</h2>
+          <div class="canvas-container">
+            <canvas id="categoryChart"></canvas>
+          </div>
+        </div>
+      </section>
+        <button id="btnGerarPDF" class="btn-primary">📄 Exportar Extrato PDF</button>
+
+      <!-- Nova Tabela para o Extrato PDF -->
+      <section class="statement-section">
+        <h2>Detalhamento de Transações</h2>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Descrição</th>
+                <th>Categoria</th>
+                <th>Tipo</th>
+                <th class="align-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody id="statementTableBody">
+              <!-- Preenchido via JS -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div> <!-- Fim areaRelatorioPDF -->
+  </main>
+
+  <script src="../js/dashboard.js"></script>
+</body>
+</html>

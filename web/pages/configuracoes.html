@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinanceControl - Configurações</title>
+  <link rel="stylesheet" href="../css/configuracoes.css">
+</head>
+
+<body class="dark-theme">
+  <aside class="sidebar">
+    <h2>FinanceControl</h2>
+    <nav>
+      <a href="dashboard.html">📊 Dashboard</a>
+      <a href="configuracoes.html" class="active">⚙️ Configurações</a>
+      <a href="assistente.html">🤖 Assistente IA</a>
+    </nav>
+  </aside>
+
+  <main class="main-content">
+    <header class="topbar">
+      <div>
+        <h1>Configurações</h1>
+        <p class="subtitle">Gerencie suas preferências e sua conta</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="loggedUserName">Olá, Usuário</span>
+      </div>
+    </header>
+
+    <section class="settings-card">
+      <h2>Perfil do Usuário</h2>
+      
+      <form id="userForm">
+        <div class="input-group">
+          <label for="userNameInput">Nome de exibição</label>
+          <input type="text" id="userNameInput" placeholder="Como você quer ser chamado?">
+        </div>
+        <button type="submit" class="btn-primary">Salvar Alterações</button>
+      </form>
+    </section>
+
+    <section class="settings-card danger">
+      <h2>Gerenciamento de Conta</h2>
+      
+      <div class="action-group">
+        <div class="action-info">
+          <h3>Sair da Conta</h3>
+          <p>Ao sair, sua sessão será encerrada com segurança e você voltará para a tela de login.</p>
+        </div>
+        <button id="logoutButton" class="btn-danger">Desconectar</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="../js/configuracoes.js"></script>
+</body>
+</html>
