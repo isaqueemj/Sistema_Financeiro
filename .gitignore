@@ -1,0 +1,10 @@
+# Caminho: .gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+core/historico_ia.db
+*.db
+.DS_Store
