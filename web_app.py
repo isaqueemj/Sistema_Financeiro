@@ -1,10 +1,8 @@
 # Caminho: main.py (copie também para web_app.py)
 import os
 import io
-import re
 import socket
 import base64
-import urllib.parse
 from functools import wraps
 import qrcode
 from dotenv import load_dotenv
@@ -14,25 +12,33 @@ from flask import (
 
 from core.database import (
     init_db,
-    formatar_telefone_e164,
     criar_usuario,
     autenticar_usuario,
     obter_usuario_por_id,
     atualizar_configuracoes_usuario,
+    criar_renda_fixa,
+    listar_rendas_fixas,
+    atualizar_renda_fixa,
+    deletar_renda_fixa,
+    criar_gasto_fixo,
+    listar_gastos_fixos,
+    atualizar_gasto_fixo,
+    deletar_gasto_fixo,
     gerar_token_mobile,
     validar_e_consumir_token_mobile,
     salvar_mensagem_historico,
     listar_historico_mensagens,
-    obter_ou_criar_usuario_por_whatsapp,
     registrar_transacao,
     obter_resumo_financeiro,
-    listar_transacoes
+    listar_transacoes,
+    
 )
 from core.ia import interpretar_mensagem_financeira
-from core.whatsapp import (
-    WHATSAPP_VERIFY_TOKEN,
-    extrair_dados_webhook_meta,
-    enviar_mensagem_whatsapp_meta
+from core.telegram_bot import (
+    iniciar_bot_telegram_background,
+    processar_update_telegram,
+    obter_username_bot,
+    telegram_configurado
 )
 
 load_dotenv()
@@ -45,7 +51,9 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "chave-secreta-tcc-financecontrol
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+# Inicializa tabelas no PostgreSQL (Supabase) ou SQLite e inicia o Bot do Telegram
 init_db()
+iniciar_bot_telegram_background()
 
 
 def obter_ip_rede_local() -> str:
@@ -85,7 +93,7 @@ def serve_pages(filename):
     return send_from_directory(os.path.join(WEB_DIR, "pages"), filename)
 
 
-# ==================== ROTAS DE AUTENTICAÇÃO E PERFIL ====================
+# ==================== ROTAS DE AUTENTICAÇÃO (SEM TELEFONE) ====================
 
 @app.route("/api/auth/register", methods=["POST"])
 def api_register():
@@ -93,12 +101,12 @@ def api_register():
     nome = dados.get("nome", "")
     email = dados.get("email", "")
     senha = dados.get("senha", "")
-    telefone = dados.get("telefone_whatsapp") or None
+    telegram_username = dados.get("telegram_username") or None
 
     if not nome or not email or len(senha) < 6:
-        return jsonify({"sucesso": False, "erro": "Preencha todos os campos (senha mín. 6 caracteres)."}), 400
+        return jsonify({"sucesso": False, "erro": "Preencha nome, e-mail e senha (mín. 6 caracteres)."}), 400
 
-    resultado = criar_usuario(nome, email, senha, telefone)
+    resultado = criar_usuario(nome, email, senha, telegram_username)
     return jsonify(resultado), (201 if resultado["sucesso"] else 400)
 
 
@@ -133,7 +141,12 @@ def api_me():
     if not usuario:
         session.clear()
         return jsonify({"sucesso": False, "erro": "Usuário não encontrado."}), 404
-    return jsonify({"sucesso": True, "usuario": usuario}), 200
+    return jsonify({
+        "sucesso": True,
+        "usuario": usuario,
+        "telegram_bot_username": obter_username_bot(),
+        "telegram_ativo": telegram_configurado()
+    }), 200
 
 
 @app.route("/api/usuario/configuracoes", methods=["PUT"])
@@ -141,25 +154,123 @@ def api_me():
 def api_atualizar_config():
     dados = request.get_json(silent=True) or {}
     nome = dados.get("nome", "").strip()
-    telefone_usuario = dados.get("telefone_whatsapp", "").strip()
-    numero_bot = dados.get("numero_bot_whatsapp", "").strip()
+    telegram_username = dados.get("telegram_username", "").strip()
+    telegram_chat_id = dados.get("telegram_chat_id", "").strip()
 
     if not nome:
         return jsonify({"sucesso": False, "erro": "O nome não pode ficar vazio."}), 400
 
-    res = atualizar_configuracoes_usuario(session["user_id"], nome, telefone_usuario, numero_bot)
+    res = atualizar_configuracoes_usuario(session["user_id"], nome, telegram_username, telegram_chat_id)
     if res["sucesso"]:
         session["user_nome"] = nome
         return jsonify(res), 200
     return jsonify(res), 400
 
 
-# ==================== LÓGICA DO QR CODE E E.164 ====================
+# ==================== ROTAS CRUD: RENDAS FIXAS ====================
+
+@app.route("/api/rendas-fixas", methods=["GET", "POST"])
+@login_obrigatorio
+def api_rendas_fixas():
+    user_id = session["user_id"]
+    if request.method == "GET":
+        itens = listar_rendas_fixas(user_id)
+        resumo = obter_resumo_financeiro(user_id)
+        return jsonify({"sucesso": True, "rendas_fixas": itens, "resumo": resumo}), 200
+
+    dados = request.get_json(silent=True) or {}
+    res = criar_renda_fixa(
+        usuario_id=user_id,
+        description=dados.get("description", ""),
+        amount=float(dados.get("amount", 0)),
+        day_of_month=int(dados.get("day_of_month", 5)),
+        is_active=dados.get("is_active", True)
+    )
+    return jsonify(res), (201 if res["sucesso"] else 400)
+
+
+@app.route("/api/rendas-fixas/<int:renda_id>", methods=["PUT", "DELETE"])
+@login_obrigatorio
+def api_renda_fixa_detalhe(renda_id):
+    user_id = session["user_id"]
+    if request.method == "DELETE":
+        res = deletar_renda_fixa(user_id, renda_id)
+        return jsonify(res), (200 if res["sucesso"] else 404)
+
+    dados = request.get_json(silent=True) or {}
+    res = atualizar_renda_fixa(
+        usuario_id=user_id,
+        renda_id=renda_id,
+        description=dados.get("description", ""),
+        amount=float(dados.get("amount", 0)),
+        day_of_month=int(dados.get("day_of_month", 5)),
+        is_active=dados.get("is_active", True)
+    )
+    return jsonify(res), (200 if res["sucesso"] else 400)
+
+
+# ==================== ROTAS CRUD: GASTOS FIXOS ====================
+
+@app.route("/api/gastos-fixos", methods=["GET", "POST"])
+@login_obrigatorio
+def api_gastos_fixos():
+    user_id = session["user_id"]
+    if request.method == "GET":
+        itens = listar_gastos_fixos(user_id)
+        resumo = obter_resumo_financeiro(user_id)
+        return jsonify({"sucesso": True, "gastos_fixos": itens, "resumo": resumo}), 200
+
+    dados = request.get_json(silent=True) or {}
+    res = criar_gasto_fixo(
+        usuario_id=user_id,
+        description=dados.get("description", ""),
+        amount=float(dados.get("amount", 0)),
+        due_day=int(dados.get("due_day", 10)),
+        is_active=dados.get("is_active", True)
+    )
+    return jsonify(res), (201 if res["sucesso"] else 400)
+
+
+@app.route("/api/gastos-fixos/<int:gasto_id>", methods=["PUT", "DELETE"])
+@login_obrigatorio
+def api_gasto_fixo_detalhe(gasto_id):
+    user_id = session["user_id"]
+    if request.method == "DELETE":
+        res = deletar_gasto_fixo(user_id, gasto_id)
+        return jsonify(res), (200 if res["sucesso"] else 404)
+
+    dados = request.get_json(silent=True) or {}
+    res = atualizar_gasto_fixo(
+        usuario_id=user_id,
+        gasto_id=gasto_id,
+        description=dados.get("description", ""),
+        amount=float(dados.get("amount", 0)),
+        due_day=int(dados.get("due_day", 10)),
+        is_active=dados.get("is_active", True)
+    )
+    return jsonify(res), (200 if res["sucesso"] else 400)
+
+
+# ==================== QR CODE (WEB MOBILE + DEEP LINK TELEGRAM) ====================
+
+def _gerar_imagem_qr_base64(conteudo: str) -> str:
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=2,
+    )
+    qr.add_data(conteudo)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#0f172a", back_color="#ffffff")
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}"
+
 
 @app.route("/api/qrcode/gerar", methods=["POST"])
 @login_obrigatorio
 def api_gerar_qrcode():
-    usuario = obter_usuario_por_id(session["user_id"])
     dados_token = gerar_token_mobile(session["user_id"], minutos_validade=10)
     token = dados_token["token"]
 
@@ -174,44 +285,17 @@ def api_gerar_qrcode():
         base_url = f"{esquema}://{host_atual}"
 
     url_continuar_celular = f"{base_url}/api/auth/mobile-login?token={token}"
-
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=8,
-        border=2,
-    )
-    qr.add_data(url_continuar_celular)
-    qr.make(fit=True)
-
-    img = qr.make_image(fill_color="#0f172a", back_color="#ffffff")
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    qr_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-    # Obtém o número E.164 configurado pelo usuário ou no .env (sem hardcode estático)
-    numero_e164 = (
-        usuario.get("numero_bot_efetivo")
-        or formatar_telefone_e164(os.getenv("WHATSAPP_BOT_NUMBER", ""))
-        or usuario.get("telefone_whatsapp")
-        or ""
-    )
-    digitos_wa = re.sub(r"\D", "", numero_e164)
-    texto_wpp = f"Olá Assistente FinanceControl! Quero continuar minha gestão financeira (Sessão #{session['user_id']})."
-
-    if digitos_wa:
-        url_whatsapp = f"https://wa.me/{digitos_wa}?text={urllib.parse.quote(texto_wpp)}"
-    else:
-        url_whatsapp = ""
+    bot_username = obter_username_bot()
+    url_telegram = f"https://t.me/{bot_username}?start={token}"
 
     return jsonify({
         "sucesso": True,
-        "qr_code_base64": f"data:image/png;base64,{qr_base64}",
+        "qr_code_web_base64": _gerar_imagem_qr_base64(url_continuar_celular),
+        "qr_code_telegram_base64": _gerar_imagem_qr_base64(url_telegram),
         "url_mobile": url_continuar_celular,
-        "url_whatsapp": url_whatsapp,
-        "numero_e164": numero_e164,
-        "validade_segundos": dados_token["validade_segundos"],
-        "ip_detectado": base_url
+        "url_telegram": url_telegram,
+        "bot_username": f"@{bot_username}",
+        "validade_segundos": dados_token["validade_segundos"]
     }), 200
 
 
@@ -258,40 +342,63 @@ def api_mobile_login():
 @app.route("/api/resumo", methods=["GET"])
 @login_obrigatorio
 def api_dashboard_stats():
-    """Endpoint unificado em tempo real para alimentar os cards e gráficos do Dashboard."""
-    resumo = obter_resumo_financeiro(session["user_id"])
-    transacoes = listar_transacoes(session["user_id"], limite=40)
+    """
+    Rota principal do Dashboard: retorna Cards de Valores (Entradas, Saídas, Saldo),
+    dados do Gráfico de Pizza (Categorias/Locais), dados do Gráfico de Colunas (Entradas vs Saídas)
+    e lista unificada de movimentações.
+    """
+    user_id = session["user_id"]
+    periodo = request.args.get("periodo", "mes_atual")
+
+    resumo = obter_resumo_financeiro(user_id, periodo=periodo)
+    transacoes = listar_transacoes(user_id, limite=40)
+    rendas_fixas = listar_rendas_fixas(user_id)
+    gastos_fixos = listar_gastos_fixos(user_id)
+
     return jsonify({
         "sucesso": True,
         "usuario": {
-            "id": session["user_id"],
+            "id": user_id,
             "nome": session.get("user_nome", "Usuário"),
             "email": session.get("user_email", "")
         },
         "resumo": resumo,
-        "transacoes": transacoes
+        "grafico_pizza": resumo["grafico_pizza"],
+        "grafico_colunas": resumo["grafico_colunas"],
+        "transacoes": transacoes,
+        "rendas_fixas": rendas_fixas,
+        "gastos_fixos": gastos_fixos
     }), 200
 
 
 @app.route("/api/transacoes", methods=["GET", "POST"])
 @login_obrigatorio
 def api_transacoes():
+    user_id = session["user_id"]
     if request.method == "GET":
-        transacoes = listar_transacoes(session["user_id"], limite=50)
-        resumo = obter_resumo_financeiro(session["user_id"])
-        return jsonify({"sucesso": True, "transacoes": transacoes, "resumo": resumo}), 200
+        transacoes = listar_transacoes(user_id, limite=50)
+        resumo = obter_resumo_financeiro(user_id, periodo="mes_atual")
+        return jsonify({
+            "sucesso": True,
+            "transacoes": transacoes,
+            "resumo": resumo
+        }), 200
 
     dados = request.get_json(silent=True) or {}
+    try:
+        valor_num = float(str(dados.get("valor", 0)).replace(",", "."))
+    except ValueError:
+        return jsonify({"sucesso": False, "erro": "Valor numérico inválido."}), 400
+
     resultado = registrar_transacao(
-        usuario_id=session["user_id"],
+        usuario_id=user_id,
         tipo=dados.get("tipo", "despesa"),
-        valor=float(dados.get("valor", 0)),
+        valor=valor_num,
         categoria=dados.get("categoria", "Outros"),
         descricao=dados.get("descricao", ""),
         moeda=dados.get("moeda", "BRL")
     )
-    resumo_atualizado = obter_resumo_financeiro(session["user_id"])
-    resultado["resumo"] = resumo_atualizado
+    resultado["resumo"] = obter_resumo_financeiro(user_id, periodo="mes_atual")
     return jsonify(resultado), (201 if resultado["sucesso"] else 400)
 
 
@@ -323,63 +430,29 @@ def api_chat():
     texto_resposta = resposta_ia.get("resposta", "Processado com sucesso.")
     salvar_mensagem_historico(user_id, "ia", texto_resposta)
 
-    resumo_atualizado = obter_resumo_financeiro(user_id)
     return jsonify({
         "sucesso": True,
         **resposta_ia,
-        "resumo": resumo_atualizado
+        "resumo": obter_resumo_financeiro(user_id)
     }), 200
 
 
-# ==================== WEBHOOK CHATBOT WHATSAPP ====================
+# ==================== WEBHOOK DO TELEGRAM ====================
 
-@app.route("/webhook/whatsapp", methods=["GET", "POST"])
-def webhook_whatsapp():
-    if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-        if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN:
-            return Response(challenge, status=200, mimetype="text/plain")
-        return Response("Token de verificação inválido", status=403)
-
-    if request.form and "Body" in request.form and "From" in request.form:
-        telefone = request.form.get("From", "").replace("whatsapp:", "")
-        texto = request.form.get("Body", "")
-        nome = request.form.get("ProfileName", "Usuário WhatsApp")
-
-        usuario = obter_ou_criar_usuario_por_whatsapp(telefone, nome)
-        salvar_mensagem_historico(usuario["id"], "usuario", texto)
-        resultado = interpretar_mensagem_financeira(usuario["id"], texto)
-        salvar_mensagem_historico(usuario["id"], "ia", resultado["resposta"])
-
-        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>{resultado['resposta']}</Message>
-</Response>"""
-        return Response(twiml, status=200, mimetype="application/xml")
-
-    payload = request.get_json(silent=True) or {}
-    dados_meta = extrair_dados_webhook_meta(payload)
-    if dados_meta:
-        usuario = obter_ou_criar_usuario_por_whatsapp(
-            dados_meta["telefone"],
-            dados_meta["nome"]
-        )
-        salvar_mensagem_historico(usuario["id"], "usuario", dados_meta["texto"])
-        resultado = interpretar_mensagem_financeira(usuario["id"], dados_meta["texto"])
-        salvar_mensagem_historico(usuario["id"], "ia", resultado["resposta"])
-        enviar_mensagem_whatsapp_meta(dados_meta["telefone"], resultado["resposta"])
-
-    return jsonify({"status": "recebido"}), 200
+@app.route("/webhook/telegram", methods=["POST"])
+def webhook_telegram():
+    update = request.get_json(silent=True) or {}
+    if update:
+        processar_update_telegram(update)
+    return jsonify({"ok": True}), 200
 
 
 if __name__ == "__main__":
     porta = int(os.getenv("PORT", 5001))
     ip_rede = obter_ip_rede_local()
     print("=" * 65)
-    print(f"🚀 SERVIDOR FINANCECONTROL RODANDO COM SUCESSO!")
+    print(f"🚀 SERVIDOR FINANCECONTROL (TELEGRAM + SQLALCHEMY) ATIVO!")
     print(f"💻 Acesso no Computador: http://127.0.0.1:{porta}")
     print(f"📱 Acesso no Celular (Wi-Fi): http://{ip_rede}:{porta}")
     print("=" * 65)
-    app.run(host="0.0.0.0", port=porta, debug=True)
+    app.run(host="0.0.0.0", port=porta, debug=True, use_reloader=False)

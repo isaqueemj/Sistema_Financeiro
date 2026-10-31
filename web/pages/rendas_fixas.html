@@ -1,0 +1,107 @@
+<!-- Caminho: web/pages/rendas_fixas.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinanceControl - Rendas Fixas</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="brand">FinanceControl</div>
+            <nav class="nav-menu">
+                <a href="/pages/dashboard.html" class="nav-item"><span>📊</span> Dashboard</a>
+                <a href="/pages/rendas_fixas.html" class="nav-item active"><span>💼</span> Rendas Fixas</a>
+                <a href="/pages/gastos_fixos.html" class="nav-item"><span>📌</span> Gastos Fixos</a>
+                <a href="/pages/assistente.html" class="nav-item"><span>🤖</span> Assistente IA</a>
+                <a href="/pages/configuracoes.html" class="nav-item"><span>⚙️</span> Configurações</a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="btn-logout" class="btn-logout">Sair da Conta</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="page-header">
+                <div>
+                    <h1>💼 Gestão de Rendas Fixas</h1>
+                    <p>Cadastre suas receitas mensais recorrentes (Salário, Vale-Alimentação, Bolsas, Aluguéis recebidos)</p>
+                </div>
+                <div class="metric-card" style="padding: 0.9rem 1.4rem;">
+                    <span class="metric-label">Total Mensal de Rendas Fixas Ativas</span>
+                    <strong class="metric-value text-green" id="total-rendas-fixas" style="font-size: 1.5rem;">R$ 0,00</strong>
+                </div>
+            </header>
+
+            <div class="dashboard-columns">
+                <!-- Formulário de Criação / Edição -->
+                <section class="panel-card">
+                    <h2 id="form-renda-titulo">➕ Cadastrar Nova Renda Fixa</h2>
+                    <div id="renda-alert" class="alert-box"></div>
+
+                    <form id="form-renda-fixa">
+                        <input type="hidden" id="renda-id" value="">
+
+                        <div class="form-group">
+                            <label for="renda-descricao">Descrição da Renda</label>
+                            <input type="text" id="renda-descricao" required placeholder="Ex: Salário Mensal, Vale-Alimentação">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="renda-valor">Valor Mensal (R$)</label>
+                                <input type="number" id="renda-valor" step="0.01" min="0.01" required placeholder="4000.00">
+                            </div>
+                            <div class="form-group">
+                                <label for="renda-dia">Dia do Recebimento (1-31)</label>
+                                <input type="number" id="renda-dia" min="1" max="31" required placeholder="5">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="renda-ativa">Status da Renda</label>
+                            <select id="renda-ativa">
+                                <option value="true">Ativa (Contabilizar no Saldo Mensal)</option>
+                                <option value="false">Inativa / Pausada</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" id="btn-salvar-renda" class="btn-submit-trans">Salvar Renda Fixa</button>
+                        <button type="button" id="btn-cancelar-edicao" class="btn-refresh" style="width:100%; margin-top:0.5rem; display:none;">Cancelar Edição</button>
+                    </form>
+                </section>
+
+                <!-- Tabela de Rendas Fixas Cadastradas -->
+                <section class="panel-card">
+                    <div class="panel-header-inline">
+                        <h2>📋 Minhas Rendas Fixas Recorrentes</h2>
+                        <span style="color:#94a3b8; font-size:0.85rem;">Dica: você também pode cadastrar pelo Telegram!</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="transacoes-table">
+                            <thead>
+                                <tr>
+                                    <th>Descrição</th>
+                                    <th>Dia do Mês</th>
+                                    <th>Valor Mensal</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-rendas-body">
+                                <tr>
+                                    <td colspan="5" class="empty-msg">Carregando rendas fixas...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="/js/rendas_fixas.js"></script>
+</body>
+</html>

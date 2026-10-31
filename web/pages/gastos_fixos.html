@@ -1,0 +1,107 @@
+<!-- Caminho: web/pages/gastos_fixos.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinanceControl - Gastos Fixos</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="brand">FinanceControl</div>
+            <nav class="nav-menu">
+                <a href="/pages/dashboard.html" class="nav-item"><span>📊</span> Dashboard</a>
+                <a href="/pages/rendas_fixas.html" class="nav-item"><span>💼</span> Rendas Fixas</a>
+                <a href="/pages/gastos_fixos.html" class="nav-item active"><span>📌</span> Gastos Fixos</a>
+                <a href="/pages/assistente.html" class="nav-item"><span>🤖</span> Assistente IA</a>
+                <a href="/pages/configuracoes.html" class="nav-item"><span>⚙️</span> Configurações</a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="btn-logout" class="btn-logout">Sair da Conta</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="page-header">
+                <div>
+                    <h1>📌 Gestão de Gastos Fixos</h1>
+                    <p>Controle suas despesas mensais recorrentes (Aluguel, Condomínio, Internet, Faculdade, Energia)</p>
+                </div>
+                <div class="metric-card" style="padding: 0.9rem 1.4rem;">
+                    <span class="metric-label">Total Mensal de Gastos Fixos Ativos</span>
+                    <strong class="metric-value text-red" id="total-gastos-fixos" style="font-size: 1.5rem;">R$ 0,00</strong>
+                </div>
+            </header>
+
+            <div class="dashboard-columns">
+                <!-- Formulário de Criação / Edição -->
+                <section class="panel-card">
+                    <h2 id="form-gasto-titulo">➕ Cadastrar Novo Gasto Fixo</h2>
+                    <div id="gasto-alert" class="alert-box"></div>
+
+                    <form id="form-gasto-fixo">
+                        <input type="hidden" id="gasto-id" value="">
+
+                        <div class="form-group">
+                            <label for="gasto-descricao">Descrição da Despesa Fixa</label>
+                            <input type="text" id="gasto-descricao" required placeholder="Ex: Aluguel, Fibra Óptica, Mensalidade UDC">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="gasto-valor">Valor Exato (R$)</label>
+                                <input type="number" id="gasto-valor" step="0.01" min="0.01" required placeholder="1500.00">
+                            </div>
+                            <div class="form-group">
+                                <label for="gasto-dia">Dia do Vencimento (1-31)</label>
+                                <input type="number" id="gasto-dia" min="1" max="31" required placeholder="10">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="gasto-ativo">Status do Compromisso</label>
+                            <select id="gasto-ativo">
+                                <option value="true">Ativo (Descontar no Orçamento Mensal)</option>
+                                <option value="false">Inativo / Pausado</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" id="btn-salvar-gasto" class="btn-submit-trans">Salvar Gasto Fixo</button>
+                        <button type="button" id="btn-cancelar-gasto" class="btn-refresh" style="width:100%; margin-top:0.5rem; display:none;">Cancelar Edição</button>
+                    </form>
+                </section>
+
+                <!-- Tabela de Gastos Fixos Cadastrados -->
+                <section class="panel-card">
+                    <div class="panel-header-inline">
+                        <h2>📋 Meus Compromissos Fixos Mensais</h2>
+                        <span style="color:#94a3b8; font-size:0.85rem;">Sincronizado com o Bot do Telegram</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="transacoes-table">
+                            <thead>
+                                <tr>
+                                    <th>Descrição</th>
+                                    <th>Dia de Vencimento</th>
+                                    <th>Valor Mensal</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-gastos-body">
+                                <tr>
+                                    <td colspan="5" class="empty-msg">Carregando gastos fixos...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="/js/gastos_fixos.js"></script>
+</body>
+</html>

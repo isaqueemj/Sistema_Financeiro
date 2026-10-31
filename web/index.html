@@ -4,142 +4,294 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Assistente Financeiro Inteligente</title>
-    <link rel="stylesheet" href="/css/dashboard.css">
-    <style>
-        body {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            background: #0f172a;
-            font-family: system-ui, -apple-system, sans-serif;
-            color: #f8fafc;
-        }
-        .auth-card {
-            background: #1e293b;
-            padding: 2.2rem;
-            border-radius: 12px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.4);
-        }
-        .auth-tabs {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 1.5rem;
-        }
-        .auth-tabs button {
-            flex: 1;
-            padding: 0.7rem;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            background: #334155;
-            color: #cbd5e1;
-        }
-        .auth-tabs button.active {
-            background: #10b981;
-            color: #ffffff;
-        }
-        .form-group {
-            margin-bottom: 1rem;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 0.4rem;
-            font-size: 0.9rem;
-            color: #cbd5e1;
-        }
-        .form-group input {
-            width: 100%;
-            padding: 0.75rem;
-            border-radius: 8px;
-            border: 1px solid #475569;
-            background: #0f172a;
-            color: #ffffff;
-            box-sizing: border-box;
-        }
-        .btn-submit {
-            width: 100%;
-            padding: 0.85rem;
-            border: none;
-            border-radius: 8px;
-            background: #10b981;
-            color: #ffffff;
-            font-weight: 700;
-            cursor: pointer;
-            margin-top: 0.5rem;
-        }
-        .btn-submit:hover {
-            background: #059669;
-        }
-        .alert-box {
-            padding: 0.75rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            font-size: 0.9rem;
-            display: none;
-        }
-        .alert-error {
-            background: rgba(239, 68, 68, 0.2);
-            border: 1px solid #ef4444;
-            color: #fca5a5;
-        }
-        .alert-success {
-            background: rgba(16, 185, 129, 0.2);
-            border: 1px solid #10b981;
-            color: #6ee7b7;
-        }
-    </style>
+    <title>FinanceControl - Login e Cadastro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/css/auth.css">
 </head>
 <body>
-    <div class="auth-card">
-        <h2 style="text-align: center; margin-top: 0;">Assistente Financeiro IA</h2>
-        <div class="auth-tabs">
-            <button id="tab-login" class="active" type="button" onclick="alternarAba('login')">Entrar</button>
-            <button id="tab-register" type="button" onclick="alternarAba('register')">Criar Conta</button>
+    <main class="auth-wrapper">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-12 col-xl-10">
+                    <section class="split-auth-card" aria-label="Autenticação do Sistema">
+                        <div class="row g-0">
+                            
+                            <!-- COLUNA 1 (PRINCIPAL): LOGIN, 2FA, CADASTRO E REDEFINIÇÃO DE SENHA -->
+                            <div class="col-12 col-lg-7 auth-col-main">
+                                <div class="auth-form-container">
+                                    
+                                    <div class="brand-header">
+                                        <span class="brand-icon">💎</span>
+                                        <span class="brand-name">FinanceControl</span>
+                                    </div>
+
+                                    <div id="auth-alert" class="alert-box" role="alert"></div>
+
+                                    <!-- VISÃO 1: FORMULÁRIO DE LOGIN -->
+                                    <div id="view-login" class="auth-view active">
+                                        <h1 class="auth-title">Acesse sua conta</h1>
+                                        <p class="auth-subtitle">
+                                            Entre com seu E-mail ou @Telegram vinculado para acessar o painel.
+                                        </p>
+
+                                        <form id="form-login" novalidate>
+                                            <div class="form-group">
+                                                <label for="login-identificador">E-mail ou @Telegram</label>
+                                                <div class="input-icon-wrapper">
+                                                    <i class="bi bi-person-badge input-icon-left"></i>
+                                                    <input 
+                                                        type="text" 
+                                                        id="login-identificador" 
+                                                        name="identificador"
+                                                        required 
+                                                        autocomplete="username"
+                                                        placeholder="seu@email.com ou @seu_telegram">
+                                                </div>
+                                                <small class="field-hint">
+                                                    Digite seu e-mail cadastrado ou seu @usuário do Telegram.
+                                                </small>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="login-senha">Senha</label>
+                                                <div class="input-icon-wrapper">
+                                                    <i class="bi bi-lock input-icon-left"></i>
+                                                    <input 
+                                                        type="password" 
+                                                        id="login-senha" 
+                                                        name="senha"
+                                                        required 
+                                                        autocomplete="current-password"
+                                                        placeholder="••••••••">
+                                                    <button 
+                                                        type="button" 
+                                                        class="btn-toggle-password" 
+                                                        data-target="login-senha"
+                                                        aria-label="Mostrar ou ocultar senha">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div class="d-flex justify-content-end align-items-center mb-4">
+                                                <a href="#" class="forgot-password-link" data-bs-toggle="modal" data-bs-target="#modalEsqueciSenha">
+                                                    Esqueci minha senha?
+                                                </a>
+                                            </div>
+
+                                            <button type="submit" id="btn-entrar" class="btn-submit">
+                                                <span>ENTRAR</span>
+                                                <i class="bi bi-arrow-right-short fs-5"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+
+                                    <!-- VISÃO 2: VERIFICAÇÃO 2FA (1º LOGIN) -->
+                                    <div id="view-2fa" class="auth-view">
+                                        <div class="twofa-badge">
+                                            <i class="bi bi-shield-lock-fill"></i> Verificação de Segurança (2FA)
+                                        </div>
+                                        <h2 class="auth-title">Confirme seu 1º acesso</h2>
+                                        <p class="auth-subtitle">
+                                            Enviamos um código de 6 dígitos para o e-mail 
+                                            <strong id="twofa-email-destino" class="text-white">u***@email.com</strong>. 
+                                            Insira o código abaixo para liberar sua conta.
+                                        </p>
+
+                                        <form id="form-2fa" novalidate>
+                                            <div class="otp-inputs-container" aria-label="Código de verificação de 6 dígitos">
+                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 1">
+                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 2">
+                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 3">
+                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 4">
+                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 5">
+                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 6">
+                                            </div>
+
+                                            <button type="submit" id="btn-validar-2fa" class="btn-submit btn-submit-green mt-3">
+                                                <i class="bi bi-check2-circle"></i>
+                                                <span>VERIFICAR E ACESSAR</span>
+                                            </button>
+
+                                            <div class="twofa-footer">
+                                                <span>Não recebeu o código? 
+                                                    <button type="button" id="btn-reenviar-2fa" class="btn-link-inline">Reenviar código por e-mail</button>
+                                                </span>
+                                                <button type="button" id="btn-voltar-login" class="btn-link-muted">
+                                                    &larr; Voltar para o login
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+
+                                    <!-- VISÃO 3: FORMULÁRIO DE CADASTRO (@TELEGRAM OBRIGATÓRIO) -->
+                                    <div id="view-register" class="auth-view">
+                                        <h2 class="auth-title">Crie sua conta</h2>
+                                        <p class="auth-subtitle">
+                                            Cadastre seus dados e seu @Telegram obrigatório para sincronizar com o Bot IA.
+                                        </p>
+
+                                        <form id="form-register" novalidate>
+                                            <div class="form-group">
+                                                <label for="reg-nome">Nome Completo *</label>
+                                                <div class="input-icon-wrapper">
+                                                    <i class="bi bi-person input-icon-left"></i>
+                                                    <input type="text" id="reg-nome" required placeholder="Seu nome completo">
+                                                </div>
+                                            </div>
+
+                                            <div class="row g-2">
+                                                <div class="col-12 col-sm-6">
+                                                    <div class="form-group">
+                                                        <label for="reg-email">E-mail *</label>
+                                                        <div class="input-icon-wrapper">
+                                                            <i class="bi bi-envelope input-icon-left"></i>
+                                                            <input type="email" id="reg-email" required placeholder="seu@email.com">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-12 col-sm-6">
+                                                    <div class="form-group">
+                                                        <label for="reg-telegram">@Telegram (Obrigatório) *</label>
+                                                        <div class="input-icon-wrapper">
+                                                            <i class="bi bi-telegram input-icon-left"></i>
+                                                            <input 
+                                                                type="text" 
+                                                                id="reg-telegram" 
+                                                                required 
+                                                                placeholder="@seu_usuario">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="reg-senha">Senha (mínimo 6 caracteres) *</label>
+                                                <div class="input-icon-wrapper">
+                                                    <i class="bi bi-lock input-icon-left"></i>
+                                                    <input type="password" id="reg-senha" required minlength="6" placeholder="••••••••">
+                                                    <button 
+                                                        type="button" 
+                                                        class="btn-toggle-password" 
+                                                        data-target="reg-senha"
+                                                        aria-label="Mostrar ou ocultar senha de cadastro">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <button type="submit" id="btn-cadastrar" class="btn-submit btn-submit-green mt-2">
+                                                <span>CADASTRAR COM SEGURANÇA</span>
+                                            </button>
+                                        </form>
+                                    </div>
+
+                                    <!-- VISÃO 4: REDEFINIR SENHA (ACIONADA PELO LINK DO E-MAIL) -->
+                                    <div id="view-reset-password" class="auth-view">
+                                        <h2 class="auth-title">Criar Nova Senha</h2>
+                                        <p class="auth-subtitle">
+                                            Digite sua nova senha de acesso abaixo para concluir a recuperação.
+                                        </p>
+
+                                        <form id="form-reset-password" novalidate>
+                                            <div class="form-group">
+                                                <label for="nova-senha-reset">Nova Senha (mínimo 6 caracteres)</label>
+                                                <div class="input-icon-wrapper">
+                                                    <i class="bi bi-lock-fill input-icon-left"></i>
+                                                    <input type="password" id="nova-senha-reset" required minlength="6" placeholder="••••••••">
+                                                    <button 
+                                                        type="button" 
+                                                        class="btn-toggle-password" 
+                                                        data-target="nova-senha-reset"
+                                                        aria-label="Mostrar ou ocultar nova senha">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <button type="submit" id="btn-salvar-nova-senha" class="btn-submit btn-submit-green mt-2">
+                                                <span>SALVAR NOVA SENHA</span>
+                                            </button>
+                                        </form>
+                                    </div>
+
+                                </div>
+                            </div>
+
+                            <!-- COLUNA 2 (DESTAQUE): CHAMADA PARA CADASTRO -->
+                            <div class="col-12 col-lg-5 auth-col-highlight">
+                                <div class="highlight-content">
+                                    <div class="highlight-badge">
+                                        <i class="bi bi-stars"></i> Assistente Financeiro IA
+                                    </div>
+
+                                    <h2 id="cta-titulo" class="highlight-title">Novo por aqui?</h2>
+                                    <p id="cta-descricao" class="highlight-text">
+                                        Cadastre-se vinculando seu @Telegram obrigatório e registre gastos por linguagem natural com gráficos em tempo real.
+                                    </p>
+
+                                    <ul class="highlight-features" id="cta-features">
+                                        <li><i class="bi bi-check-circle-fill"></i> Vínculo unívoco via @Telegram (RN03)</li>
+                                        <li><i class="bi bi-check-circle-fill"></i> Lançamentos em linguagem natural</li>
+                                        <li><i class="bi bi-check-circle-fill"></i> Verificação 2FA por e-mail no 1º acesso</li>
+                                    </ul>
+
+                                    <button type="button" id="btn-alternar-modo" class="btn-outline-highlight">
+                                        CRIAR CONTA
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                    </section>
+                </div>
+            </div>
         </div>
+    </main>
 
-        <div id="auth-alert" class="alert-box"></div>
+    <!-- MODAL: ESQUECI MINHA SENHA -->
+    <div class="modal fade" id="modalEsqueciSenha" tabindex="-1" aria-labelledby="modalEsqueciSenhaLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content custom-modal">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold text-white" id="modalEsqueciSenhaLabel">
+                        <i class="bi bi-key-fill text-primary me-2"></i>Recuperar Senha
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body pt-3">
+                    <p class="modal-desc">
+                        Informe o seu e-mail cadastrado abaixo. Enviaremos um link seguro para você redefinir sua senha.
+                    </p>
 
-        <!-- Formulário de Login -->
-        <form id="form-login">
-            <div class="form-group">
-                <label for="login-email">E-mail</label>
-                <input type="email" id="login-email" required placeholder="seu@email.com">
-            </div>
-            <div class="form-group">
-                <label for="login-senha">Senha</label>
-                <input type="password" id="login-senha" required placeholder="••••••••">
-            </div>
-            <button type="submit" class="btn-submit">Acessar Painel</button>
-        </form>
+                    <div id="forgot-alert" class="alert-box" role="alert"></div>
 
-        <!-- Formulário de Cadastro -->
-        <form id="form-register" style="display: none;">
-            <div class="form-group">
-                <label for="reg-nome">Nome Completo</label>
-                <input type="text" id="reg-nome" required placeholder="Seu Nome">
+                    <form id="form-esqueci-senha" novalidate>
+                        <div class="form-group mb-3">
+                            <label for="recuperar-email">E-mail cadastrado</label>
+                            <div class="input-icon-wrapper">
+                                <i class="bi bi-envelope input-icon-left"></i>
+                                <input 
+                                    type="email" 
+                                    id="recuperar-email" 
+                                    required 
+                                    placeholder="seu@email.com">
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-end gap-2 mt-4">
+                            <button type="button" class="btn-cancel-modal" data-bs-dismiss="modal">Fechar</button>
+                            <button type="submit" id="btn-enviar-recuperacao" class="btn-submit w-auto px-4 mt-0">
+                                Enviar Link
+                            </button>
+                        </div>
+                    </form>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="reg-email">E-mail</label>
-                <input type="email" id="reg-email" required placeholder="seu@email.com">
-            </div>
-            <div class="form-group">
-                <label for="reg-whatsapp">WhatsApp (com DDD, opcional)</label>
-                <input type="text" id="reg-whatsapp" placeholder="5545999999999">
-            </div>
-            <div class="form-group">
-                <label for="reg-senha">Senha (mínimo 6 caracteres)</label>
-                <input type="password" id="reg-senha" required minlength="6" placeholder="••••••••">
-            </div>
-            <button type="submit" class="btn-submit">Cadastrar com Segurança</button>
-        </form>
+        </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/js/auth.js"></script>
 </body>
 </html>

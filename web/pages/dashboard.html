@@ -1,138 +1,214 @@
+<!-- Caminho: web/pages/dashboard.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FinanceControl - Relatórios Avançados</title>
-  
-  <link rel="stylesheet" href="../css/dashboard.css">
-  
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- HTML2PDF para geração do extrato -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinanceControl - Dashboard Inteligente</title>
+    <link rel="stylesheet" href="/css/dashboard.css?v=3">
+    <!-- CDN Principal (Cloudflare) + Fallback (jsDelivr) para Chart.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"
+            onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';document.head.appendChild(s);"></script>
 </head>
+<body>
+    <div class="app-layout">
+        <!-- Menu Lateral -->
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-icon">💎</span> FinanceControl
+            </div>
+            <nav class="nav-menu">
+                <a href="/pages/dashboard.html" class="nav-item active">
+                    <span>📊</span> Dashboard
+                </a>
+                <a href="/pages/rendas_fixas.html" class="nav-item">
+                    <span>💼</span> Rendas Fixas
+                </a>
+                <a href="/pages/gastos_fixos.html" class="nav-item">
+                    <span>📌</span> Gastos Fixos
+                </a>
+                <a href="/pages/assistente.html" class="nav-item">
+                    <span>🤖</span> Assistente IA
+                </a>
+                <a href="/pages/configuracoes.html" class="nav-item">
+                    <span>⚙️</span> Configurações
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="btn-logout" class="btn-logout">Sair da Conta</button>
+            </div>
+        </aside>
 
-<body class="dark-theme">
-  <aside class="sidebar">
-    <h2>FinanceControl</h2>
-    <nav>
-      <a href="dashboard.html" class="active">📊 Dashboard</a>
-      <a href="configuracoes.html">⚙️ Configurações</a>
-      <a href="assistente.html">🤖 Assistente IA</a>
-    </nav>
-  </aside>
+        <!-- Área Principal -->
+        <main class="main-content">
+            <!-- Cabeçalho e Filtro de Período -->
+            <header class="page-header">
+                <div>
+                    <h1>Painel de Controle Financeiro</h1>
+                    <p id="subtitulo-mes">Visão consolidada de Entradas, Saídas e Saldo em Tempo Real</p>
+                </div>
+                <div class="header-actions">
+                    <select id="filtro-periodo" class="select-periodo" title="Filtrar período">
+                        <option value="mes_atual">📅 Mês Vigente</option>
+                        <option value="ultimos_30_dias">🗓️ Últimos 30 Dias</option>
+                        <option value="todos">📂 Todo o Histórico</option>
+                    </select>
+                    <span class="user-greeting" id="dash-user-name">Olá, Usuário</span>
+                    <button id="btn-refresh-dash" class="btn-refresh" type="button">🔄 Atualizar</button>
+                </div>
+            </header>
 
-  <main class="main-content">
-    <header class="topbar">
-      <div>
-        <h1>Relatórios e Extratos</h1>
-        <p class="subtitle">Análise detalhada das suas finanças</p>
-      </div>
-      <div class="topbar-actions">
-        <span id="loggedUserName">Olá, Isaque</span>
+            <!-- 1. CARDS DE VALORES EM TEMPO REAL -->
+            <section class="metrics-grid">
+                <div class="metric-card card-saldo">
+                    <div class="metric-top">
+                        <span class="metric-label">Saldo Atual do Mês</span>
+                        <span class="metric-icon">🏦</span>
+                    </div>
+                    <strong class="metric-value" id="metric-saldo">R$ 0,00</strong>
+                    <div class="metric-sub" id="metric-status-orca">Calculando balanço mensal...</div>
+                </div>
 
-      </div>
-    </header>
+                <div class="metric-card card-receita">
+                    <div class="metric-top">
+                        <span class="metric-label">Total de Entradas (Receitas)</span>
+                        <span class="metric-icon">📈</span>
+                    </div>
+                    <strong class="metric-value text-green" id="metric-receitas">R$ 0,00</strong>
+                    <div class="metric-sub" id="detalhe-receitas">
+                        Rendas Fixas: R$ 0,00 | Variáveis: R$ 0,00
+                    </div>
+                </div>
 
-    <!-- Tudo dentro desta div sairá no PDF -->
-    <div id="areaRelatorioPDF">
-      
-      <!-- Cabeçalho visível apenas no PDF -->
-      <div class="pdf-header" style="display: none;">
-        <h2>Extrato Financeiro - FinanceControl</h2>
-        <p id="dataEmissaoPdf"></p>
-      </div>
+                <div class="metric-card card-despesa">
+                    <div class="metric-top">
+                        <span class="metric-label">Total de Saídas (Gastos)</span>
+                        <span class="metric-icon">📉</span>
+                    </div>
+                    <strong class="metric-value text-red" id="metric-despesas">R$ 0,00</strong>
+                    <div class="metric-sub" id="detalhe-despesas">
+                        Gastos Fixos: R$ 0,00 | Variáveis: R$ 0,00
+                    </div>
+                </div>
+            </section>
 
-      <section class="summary-cards">
-        <div class="card income">
-          <div class="card-icon">↗️</div>
-          <div class="card-info">
-            <h3>Receitas Totais</h3>
-            <p id="reportReceitas">R$ 0,00</p>
-          </div>
-        </div>
+            <!-- 2. SEÇÃO DE GRÁFICOS INTERATIVOS -->
+            <section class="charts-grid">
+                <!-- Gráfico de Colunas: Entrada vs. Saída por Período -->
+                <div class="panel-card chart-card">
+                    <div class="panel-header-inline">
+                        <div>
+                            <h2>📊 Entradas vs. Saídas por Período</h2>
+                            <p class="chart-subtitle">Comparativo mensal do volume financeiro (R$)</p>
+                        </div>
+                    </div>
+                    <div class="chart-wrapper" id="container-colunas">
+                        <canvas id="chart-colunas"></canvas>
+                        <div id="fallback-colunas" class="svg-chart-container" style="display: none;"></div>
+                    </div>
+                </div>
 
-        <div class="card expense">
-          <div class="card-icon">↘️</div>
-          <div class="card-info">
-            <h3>Despesas Totais</h3>
-            <p id="reportDespesas">R$ 0,00</p>
-          </div>
-        </div>
+                <!-- Gráfico de Pizza: Gastos por Local / Categoria -->
+                <div class="panel-card chart-card">
+                    <div class="panel-header-inline">
+                        <div>
+                            <h2>🍕 Distribuição de Gastos por Categoria</h2>
+                            <p class="chart-subtitle">Proporção de despesas variáveis e compromissos fixos</p>
+                        </div>
+                    </div>
+                    <div class="chart-wrapper" id="container-pizza">
+                        <canvas id="chart-pizza"></canvas>
+                        <div id="fallback-pizza" class="svg-chart-container" style="display: none;"></div>
+                        <div id="pizza-empty" class="empty-msg" style="display: none;">
+                            Nenhum gasto registrado neste período para exibir no gráfico.
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-        <div class="card balance">
-          <div class="card-icon">💰</div>
-          <div class="card-info">
-            <h3>Saldo Atual</h3>
-            <p id="reportSaldo">R$ 0,00</p>
-          </div>
-        </div>
-      </section>
+            <!-- 3. LANÇAMENTO RÁPIDO E HISTÓRICO DE MOVIMENTAÇÕES -->
+            <section class="dashboard-columns">
+                <div class="col-left">
+                    <div class="panel-card">
+                        <h2>➕ Novo Lançamento Rápido</h2>
+                        <p class="chart-subtitle" style="margin-bottom: 1rem;">
+                            Adicione receitas ou gastos avulsos e veja os gráficos atualizarem na hora
+                        </p>
+                        <div id="dash-alert" class="alert-box"></div>
 
-      <section class="metrics-cards">
-        <div class="metric">
-          <span>Maior Receita:</span>
-          <strong id="maiorReceita" class="text-green">R$ 0,00</strong>
-        </div>
-        <div class="metric">
-          <span>Maior Despesa:</span>
-          <strong id="maiorDespesa" class="text-red">R$ 0,00</strong>
-        </div>
-        <div class="metric">
-          <span>Média de Gastos:</span>
-          <strong id="mediaGastos">R$ 0,00</strong>
-        </div>
-      </section>
+                        <form id="form-nova-transacao">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="trans-tipo">Tipo de Movimentação</label>
+                                    <select id="trans-tipo" required>
+                                        <option value="despesa">💸 Saída (Gasto)</option>
+                                        <option value="receita">💰 Entrada (Receita)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="trans-valor">Valor em Reais (R$)</label>
+                                    <input type="number" id="trans-valor" step="0.01" min="0.01" required placeholder="Ex: 85.50">
+                                </div>
+                            </div>
 
-      <section class="charts-grid">
-        <div class="chart-card">
-          <h2>Distribuição Geral</h2>
-          <div class="canvas-container">
-            <canvas id="pizzaChart"></canvas>
-          </div>
-        </div>
+                            <div class="form-group">
+                                <label for="trans-categoria">Local / Categoria</label>
+                                <select id="trans-categoria" required>
+                                    <option value="Alimentação">🛒 Alimentação / Mercado</option>
+                                    <option value="Moradia">🏠 Moradia / Contas</option>
+                                    <option value="Transporte">🚗 Transporte / Combustível</option>
+                                    <option value="Lazer">🎬 Lazer / Restaurante</option>
+                                    <option value="Saúde">💊 Saúde / Farmácia</option>
+                                    <option value="Educação">📚 Educação / Cursos</option>
+                                    <option value="Vestuário">👕 Vestuário / Compras</option>
+                                    <option value="Salário">💼 Salário / Adiantamento</option>
+                                    <option value="Renda Extra">🚀 Renda Extra / PIX</option>
+                                    <option value="Outros">📌 Outros</option>
+                                </select>
+                            </div>
 
-        <div class="chart-card">
-          <h2>Fluxo Mensal</h2>
-          <div class="canvas-container">
-            <canvas id="barChart"></canvas>
-          </div>
-        </div>
+                            <div class="form-group">
+                                <label for="trans-descricao">Descrição ou Estabelecimento</label>
+                                <input type="text" id="trans-descricao" required placeholder="Ex: Supermercado, Posto, Freela">
+                            </div>
 
-        <div class="chart-card full">
-          <h2>Despesas por Categoria</h2>
-          <div class="canvas-container">
-            <canvas id="categoryChart"></canvas>
-          </div>
-        </div>
-      </section>
-        <button id="btnGerarPDF" class="btn-primary">📄 Exportar Extrato PDF</button>
+                            <button type="submit" class="btn-submit-trans">Registrar e Atualizar Painel</button>
+                        </form>
+                    </div>
+                </div>
 
-      <!-- Nova Tabela para o Extrato PDF -->
-      <section class="statement-section">
-        <h2>Detalhamento de Transações</h2>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th>Descrição</th>
-                <th>Categoria</th>
-                <th>Tipo</th>
-                <th class="align-right">Valor</th>
-              </tr>
-            </thead>
-            <tbody id="statementTableBody">
-              <!-- Preenchido via JS -->
-            </tbody>
-          </table>
-        </div>
-      </section>
+                <div class="panel-card col-right">
+                    <div class="panel-header-inline">
+                        <div>
+                            <h2>📋 Últimas Movimentações Registradas</h2>
+                            <p class="chart-subtitle">Lançamentos efetuados via Painel Web e Bot do Telegram</p>
+                        </div>
+                        <a href="/pages/assistente.html" class="link-ia">🤖 Conversar com a IA &rarr;</a>
+                    </div>
 
-    </div> <!-- Fim areaRelatorioPDF -->
-  </main>
+                    <div class="table-responsive">
+                        <table class="transacoes-table">
+                            <thead>
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Descrição / Local</th>
+                                    <th>Categoria</th>
+                                    <th>Tipo</th>
+                                    <th>Valor (BRL)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-transacoes-body">
+                                <tr>
+                                    <td colspan="5" class="empty-msg">Carregando dados financeiros...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
 
-  <script src="../js/dashboard.js"></script>
+    <script src="/js/dashboard.js?v=3"></script>
 </body>
 </html>

@@ -10,10 +10,12 @@
 <body class="dark-theme">
   <aside class="sidebar">
     <h2>FinanceControl</h2>
-    <nav>
-      <a href="dashboard.html">📊 Dashboard</a>
-      <a href="configuracoes.html">⚙️ Configurações</a>
-      <a href="assistente.html" class="active">🤖 Assistente IA</a>
+    <nav class="nav-menu">
+        <a href="/pages/dashboard.html" class="nav-item"><span>📊</span> Dashboard</a>
+        <a href="/pages/rendas_fixas.html" class="nav-item"><span>💼</span> Rendas Fixas</a>
+        <a href="/pages/gastos_fixos.html" class="nav-item"><span>📌</span> Gastos Fixos</a>
+        <a href="/pages/assistente.html" class="nav-item"><span>🤖</span> Assistente IA</a>
+        <a href="/pages/configuracoes.html" class="nav-item"><span>⚙️</span> Configurações</a>
     </nav>
   </aside>
 
@@ -24,7 +26,7 @@
         <p class="subtitle">Tire dúvidas e peça análises sobre suas finanças</p>
       </div>
       <div class="topbar-actions">
-        <span id="loggedUserName">Olá, Usuário</span>
+        <span class="user-greeting" id="dash-user-name">Olá, Usuário</span>
       </div>
     </header>
 

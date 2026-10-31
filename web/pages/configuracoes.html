@@ -9,125 +9,105 @@
 </head>
 <body>
     <div class="app-layout">
-        <!-- Menu Lateral (Sidebar) -->
         <aside class="sidebar">
             <div class="brand">FinanceControl</div>
             <nav class="nav-menu">
-                <a href="/pages/dashboard.html" class="nav-item">
-                    <span>📊</span> Dashboard
-                </a>
-                <a href="/pages/configuracoes.html" class="nav-item active">
-                    <span>⚙️</span> Configurações
-                </a>
-                <a href="/pages/assistente.html" class="nav-item">
-                    <span>🤖</span> Assistente IA
-                </a>
+                <a href="/pages/dashboard.html" class="nav-item"><span>📊</span> Dashboard</a>
+                <a href="/pages/rendas_fixas.html" class="nav-item"><span>💼</span> Rendas Fixas</a>
+                <a href="/pages/gastos_fixos.html" class="nav-item"><span>📌</span> Gastos Fixos</a>
+                <a href="/pages/assistente.html" class="nav-item"><span>🤖</span> Assistente IA</a>
+                <a href="/pages/configuracoes.html" class="nav-item active"><span>⚙️</span> Configurações</a>
             </nav>
             <div class="sidebar-footer">
                 <button id="btn-logout" class="btn-logout">Sair da Conta</button>
             </div>
         </aside>
 
-        <!-- Conteúdo Principal -->
         <main class="main-content">
             <header class="page-header">
                 <div>
-                    <h1>Configurações da Conta</h1>
-                    <p>Gerencie seus dados e conecte seu smartphone para continuar a conversa</p>
+                    <h1>Configurações e Integração Telegram</h1>
+                    <p>Vincule sua conta ao Bot do Telegram ou continue a conversa no smartphone via QR Code</p>
                 </div>
                 <div class="user-greeting" id="header-user-name">Olá, Usuário</div>
             </header>
 
             <div class="settings-grid">
-                <!-- Card 1: Continuar / Conversar no Celular via QR Code -->
+                <!-- Card 1: QR Code e Vínculo com Telegram -->
                 <section class="settings-card highlight-card">
-                    <div class="card-badge">Sincronização Mobile</div>
-                    <h2>📱 Conversar no Celular</h2>
+                    <div class="card-badge">Integração Telegram & Mobile</div>
+                    <h2>✈️ Conversar no Telegram / Celular</h2>
                     <p class="card-desc">
-                        Continue sua conversa com o Assistente Financeiro IA diretamente no seu smartphone de onde parou, sem precisar digitar senha.
+                        Escaneie o QR Code para vincular sua conta diretamente ao nosso Bot no Telegram e cadastrar rendas fixas, gastos fixos ou consultar seu saldo pelo celular.
                     </p>
 
                     <div class="mobile-features">
-                        <div class="feature-item">✅ Histórico de conversa sincronizado em tempo real</div>
-                        <div class="feature-item">✅ Autenticação instantânea via token temporário seguro</div>
-                        <div class="feature-item">✅ Acesso direto ao Chat Web Mobile ou WhatsApp</div>
+                        <div class="feature-item">✅ Vínculo automático de 1 clique com o Bot do Telegram</div>
+                        <div class="feature-item">✅ Reconhecimento de Gastos Fixos e Rendas Fixas por IA</div>
+                        <div class="feature-item">✅ Sem necessidade de informar número de telefone</div>
                     </div>
 
                     <button id="btn-abrir-qrcode" class="btn-primary-qr">
-                        <span>📷</span> Gerar QR Code para Celular
+                        <span>📷</span> Gerar QR Code (Telegram / Mobile)
                     </button>
                 </section>
 
-                <!-- Card 2: Dados do Perfil e Vínculo WhatsApp -->
+                <!-- Card 2: Dados do Perfil (Sem Telefone) -->
                 <section class="settings-card">
-                    <h2>👤 Dados do Perfil</h2>
-                    <p class="card-desc">Atualize sua identificação e número de WhatsApp (RN03).</p>
+                    <h2>👤 Dados do Perfil e Vínculo Telegram</h2>
+                    <p class="card-desc">Gerencie seu nome e sua identificação exclusiva do Telegram (RN03).</p>
 
                     <div id="config-alert" class="alert-box"></div>
 
-                    <!-- Substitua o bloco <form id="form-config"> dentro de web/pages/configuracoes.html por este: -->
-                        <form id="form-config">
-                            <div class="form-group">
-                                <label for="conf-nome">Nome de Exibição</label>
-                                <input type="text" id="conf-nome" required placeholder="Seu Nome">
-                            </div>
-                            <div class="form-group">
-                                <label for="conf-email">E-mail (Login)</label>
-                                <input type="email" id="conf-email" disabled>
-                            </div>
-                            <div class="form-group">
-                                <label for="conf-whatsapp">Seu WhatsApp Pessoal (Padrão E.164)</label>
-                                <input type="tel" id="conf-whatsapp" placeholder="+5545999999999">
-                            </div>
-                            <div class="form-group">
-                                <label for="conf-bot-whatsapp">Número do Bot WhatsApp para Integração (Padrão E.164)</label>
-                                <input type="tel" id="conf-bot-whatsapp" placeholder="+5545988888888">
-                            </div>
-                            <button type="submit" class="btn-save">Salvar Configurações (E.164)</button>
-                        </form>
+                    <form id="form-config">
+                        <div class="form-group">
+                            <label for="conf-nome">Nome de Exibição</label>
+                            <input type="text" id="conf-nome" required placeholder="Seu Nome">
+                        </div>
+                        <div class="form-group">
+                            <label for="conf-email">E-mail (Login)</label>
+                            <input type="email" id="conf-email" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label for="conf-telegram-username">Username do Telegram (sem telefone)</label>
+                            <input type="text" id="conf-telegram-username" placeholder="@seu_usuario">
+                        </div>
+                        <div class="form-group">
+                            <label for="conf-telegram-chat-id">Telegram Chat ID (preenchido automaticamente no /start ou digite /id no Bot)</label>
+                            <input type="text" id="conf-telegram-chat-id" placeholder="Ex: 123456789">
+                        </div>
+                        <button type="submit" class="btn-save">Salvar Configurações</button>
+                    </form>
                 </section>
             </div>
         </main>
     </div>
 
-    <!-- Modal do QR Code ("Continuar no Smartphone") -->
+    <!-- Modal QR Code -->
     <div id="modal-qrcode" class="modal-overlay" aria-hidden="true">
         <div class="modal-container">
             <button id="btn-fechar-modal" class="modal-close" title="Fechar">&times;</button>
 
             <div class="modal-header">
-                <h3>📱 Continuar no Smartphone</h3>
-                <p>Aponte a câmera do seu celular para o QR Code abaixo para abrir sua conversa ativa imediatamente.</p>
+                <h3>✈️ Conectar ao Bot do Telegram</h3>
+                <p>Aponte a câmera do celular para abrir o Bot no Telegram já vinculado à sua conta ou continuar pelo navegador.</p>
             </div>
 
-            <!-- Abas de modo do QR Code -->
             <div class="qr-mode-tabs">
-                <button type="button" id="tab-qr-web" class="qr-tab active">Chat App Mobile (Direto)</button>
-                <button type="button" id="tab-qr-wpp" class="qr-tab">Abrir no WhatsApp</button>
+                <button type="button" id="tab-qr-tg" class="qr-tab active">Abrir Bot no Telegram</button>
+                <button type="button" id="tab-qr-web" class="qr-tab">Chat Web Mobile</button>
             </div>
 
-            <!-- Área de exibição do QR Code -->
             <div class="qr-display-box">
-                <div id="qr-loading" class="qr-loading">Gerando QR Code seguro...</div>
-                <img id="qr-image" src="" alt="QR Code para continuar no celular" style="display: none;">
+                <div id="qr-loading" class="qr-loading">Gerando QR Code...</div>
+                <img id="qr-image" src="" alt="QR Code" style="display: none;">
             </div>
 
-            <!-- Status e contador de expiração -->
             <div class="qr-timer-bar">
                 <span>⏱️ Token expira em: <strong id="qr-countdown">10:00</strong></span>
                 <button type="button" id="btn-renovar-qr" class="btn-link-refresh">🔄 Gerar novo</button>
             </div>
 
-            <!-- Instruções passo a passo visuais -->
-            <div class="qr-instructions">
-                <ol>
-                    <li>Conecte seu celular na <strong>mesma rede Wi-Fi</strong> (se estiver testando localmente) ou use 4G/5G (se estiver no Render).</li>
-                    <li>Abra o aplicativo da <strong>Câmera</strong> do seu smartphone e aponte para a tela.</li>
-                    <li>Toque na notificação do link exibido para continuar a conversa de onde parou!</li>
-                </ol>
-            </div>
-
-            <!-- Link copiável caso a câmera não funcione -->
             <div class="qr-copy-section">
                 <input type="text" id="qr-url-input" readonly value="">
                 <button type="button" id="btn-copiar-url" class="btn-copy">Copiar Link</button>
