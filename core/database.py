@@ -1,764 +1,1149 @@
+# Caminho: core/database.py
 import os
+import re
+import random
 import secrets
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text, inspect
-from sqlalchemy.orm import sessionmaker, scoped_session
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import (
+    create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Text, text, func
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
+from sqlalchemy.exc import IntegrityError
 
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_SQLITE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'historico_ia.db')}"
 
-# Conexão padrão apontando para o MySQL Workbench local
-# Substitua SUA_SENHA pela senha do seu MySQL Workbench (ou deixe vazio 'root:@127.0.0.1...' se não tiver)
-DEFAULT_MYSQL_URL = "mysql+pymysql://root:1234@127.0.0.1:3306/finance_control"
-
+# Lê e higieniza a URL do banco de dados (.env)
 raw_db_url = os.getenv("DATABASE_URL", "").strip().strip('"').strip("'")
 if raw_db_url.startswith("postgres://"):
     raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
 elif raw_db_url.startswith("mysql://"):
     raw_db_url = raw_db_url.replace("mysql://", "mysql+pymysql://", 1)
 
-DATABASE_URL = raw_db_url if raw_db_url else DEFAULT_MYSQL_URL
+DATABASE_URL = raw_db_url if raw_db_url else DEFAULT_SQLITE_URL
 
-IS_SQLITE = DATABASE_URL.startswith("sqlite")
-connect_args = {"check_same_thread": False} if IS_SQLITE else {"connect_timeout": 10}
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args=connect_args,
-    pool_pre_ping=True,
-    pool_recycle=280
-)
+def garantir_schema_mysql(url_conexao: str):
+    """
+    Se a URL for MySQL, conecta ao servidor MySQL Workbench e cria o banco (SCHEMA)
+    automaticamente caso ele ainda não exista.
+    """
+    if not url_conexao.startswith("mysql"):
+        return
+    try:
+        parsed = urlparse(url_conexao)
+        nome_banco = (parsed.path or "").lstrip("/")
+        if not nome_banco:
+            return
+        url_sem_banco = f"{parsed.scheme}://{parsed.netloc}/"
+        temp_engine = create_engine(url_sem_banco, pool_pre_ping=True)
+        with temp_engine.connect() as conn:
+            conn.execute(
+                text(f"CREATE DATABASE IF NOT EXISTS `{nome_banco}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+            )
+            conn.commit()
+        temp_engine.dispose()
+    except Exception as err:
+        print(f"⚠️ Aviso ao verificar/criar schema no MySQL: {err}")
+
+
+garantir_schema_mysql(DATABASE_URL)
+
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True, pool_recycle=280)
+
+# Testa a conexão com o MySQL/PostgreSQL; se falhar, exibe o motivo e usa SQLite como fallback seguro
+if not DATABASE_URL.startswith("sqlite"):
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("SELECT 1"))
+        tipo_sgbd = "MySQL Workbench" if DATABASE_URL.startswith("mysql") else "PostgreSQL"
+        print(f"✅ Conectado com sucesso ao banco de dados {tipo_sgbd}!")
+    except Exception as _err:
+        print(f"⚠️ Não foi possível conectar ao banco principal ({_err}). Usando SQLite local como fallback.")
+        DATABASE_URL = DEFAULT_SQLITE_URL
+        engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
-
-
-def get_db():
-    """Retorna uma sessão ativa do banco de dados."""
-    return SessionLocal()
+Base = declarative_base()
 
 
 # =====================================================================
-# 1. INICIALIZAÇÃO E MIGRAÇÃO AUTOMÁTICA DE TABELAS
+# MODELOS ORM (Compatíveis com MySQL 8.0, PostgreSQL e SQLite)
 # =====================================================================
-def init_db():
-    pk_auto = "INTEGER PRIMARY KEY AUTOINCREMENT" if IS_SQLITE else "INT AUTO_INCREMENT PRIMARY KEY"
-    ts_update = (
-        "DATETIME DEFAULT CURRENT_TIMESTAMP"
-        if IS_SQLITE
-        else "DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
-    )
 
-    queries_criacao = [
-        # 1. Tabela de Usuários
-        f"""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id {pk_auto},
-            nome VARCHAR(100) NOT NULL DEFAULT 'Usuário',
-            email VARCHAR(150) UNIQUE NOT NULL,
-            senha_hash VARCHAR(255) NOT NULL,
-            telegram_username VARCHAR(50) UNIQUE,
-            telegram_id VARCHAR(50) UNIQUE,
-            primeiro_login INT DEFAULT 1,
-            status_2fa INT DEFAULT 0,
-            codigo_2fa VARCHAR(10),
-            expiracao_2fa DATETIME,
-            token_recuperacao VARCHAR(255),
-            expiracao_recuperacao DATETIME,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 2. Transações
-        f"""
-        CREATE TABLE IF NOT EXISTS transacoes (
-            id {pk_auto},
-            usuario_id INT NOT NULL,
-            descricao VARCHAR(255) NOT NULL,
-            valor DECIMAL(10,2) NOT NULL,
-            categoria VARCHAR(100) DEFAULT 'Outros',
-            tipo VARCHAR(20) NOT NULL,
-            data DATETIME DEFAULT CURRENT_TIMESTAMP,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 3. Despesas Fixas (Gastos Fixos)
-        f"""
-        CREATE TABLE IF NOT EXISTS despesas_fixas (
-            id {pk_auto},
-            usuario_id INT NOT NULL,
-            descricao VARCHAR(255) NOT NULL,
-            valor DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-            categoria VARCHAR(100) DEFAULT 'Fixas',
-            dia_vencimento INT DEFAULT 1,
-            ativo INT DEFAULT 1,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 4. Receitas Fixas
-        f"""
-        CREATE TABLE IF NOT EXISTS receitas_fixas (
-            id {pk_auto},
-            usuario_id INT NOT NULL,
-            descricao VARCHAR(255) NOT NULL,
-            valor DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-            dia_recebimento INT DEFAULT 1,
-            ativo INT DEFAULT 1,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 5. Limites de Orçamento
-        f"""
-        CREATE TABLE IF NOT EXISTS limites_orcamento (
-            id {pk_auto},
-            usuario_id INT NOT NULL,
-            categoria VARCHAR(100) NOT NULL,
-            valor_limite DECIMAL(10,2) NOT NULL,
-            mes_ano VARCHAR(7),
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 6. Conversas
-        f"""
-        CREATE TABLE IF NOT EXISTS conversas (
-            id {pk_auto},
-            usuario_id INT NOT NULL,
-            titulo VARCHAR(150) DEFAULT 'Nova Conversa',
-            status VARCHAR(50) DEFAULT 'ativa',
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 7. Mensagens de Chat
-        f"""
-        CREATE TABLE IF NOT EXISTS mensagens_chat (
-            id {pk_auto},
-            conversa_id INT,
-            usuario_id INT NOT NULL,
-            remetente VARCHAR(50) NOT NULL,
-            mensagem TEXT NOT NULL,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 8. Histórico de Mensagens
-        f"""
-        CREATE TABLE IF NOT EXISTS historico_mensagens (
-            id {pk_auto},
-            usuario_id INT NOT NULL,
-            mensagem TEXT,
-            resposta TEXT,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """,
-        # 9. Tokens Mobile
-        f"""
-        CREATE TABLE IF NOT EXISTS tokens_mobile (
-            id {pk_auto},
-            usuario_id INT NOT NULL,
-            token VARCHAR(255) UNIQUE NOT NULL,
-            expira_em DATETIME,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            atualizado_em {ts_update}
-        )
-        """
+class User(Base):
+    __tablename__ = "usuarios"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nome = Column(String(120), nullable=False)
+    email = Column(String(150), unique=True, nullable=False, index=True)
+    senha_hash = Column(String(255), nullable=False)
+    telegram_username = Column(String(64), unique=False, nullable=True, index=True)
+    telegram_id = Column(String(64), unique=False, nullable=True, index=True)
+    telegram_chat_id = Column(String(64), unique=False, nullable=True)
+    telefone_whatsapp = Column(String(32), nullable=True)
+    numero_bot_whatsapp = Column(String(32), nullable=True)
+    primeiro_login = Column(Boolean, default=True, nullable=False)
+    codigo_2fa = Column(String(10), nullable=True)
+    expira_2fa = Column(DateTime, nullable=True)
+    token_reset_senha = Column(String(128), nullable=True)
+    expira_reset_senha = Column(DateTime, nullable=True)
+    consentimento_lgpd = Column(Boolean, default=True)
+    data_criacao = Column(DateTime, default=datetime.utcnow)
+
+
+class FixedIncome(Base):
+    __tablename__ = "fixed_incomes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    description = Column(String(255), nullable=False)
+    amount = Column(Float, nullable=False)
+    day_of_month = Column(Integer, nullable=False, default=5)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FixedExpense(Base):
+    __tablename__ = "fixed_expenses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    description = Column(String(255), nullable=False)
+    category = Column(String(100), nullable=False, default="Moradia")
+    amount = Column(Float, nullable=False)
+    due_day = Column(Integer, nullable=False, default=10)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo = Column(String(20), nullable=False)  # 'receita' ou 'despesa'
+    valor = Column(Float, nullable=False)
+    categoria = Column(String(100), nullable=False)
+    descricao = Column(String(255), nullable=True)
+    moeda = Column(String(10), default="BRL", nullable=False)
+    data_transacao = Column(DateTime, default=datetime.utcnow)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    remetente = Column(String(20), nullable=False)  # 'usuario' ou 'ia'
+    mensagem = Column(Text, nullable=False)
+    data_envio = Column(DateTime, default=datetime.utcnow)
+
+
+class MobileToken(Base):
+    __tablename__ = "mobile_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    token = Column(String(128), unique=True, nullable=False, index=True)
+    expira_em = Column(DateTime, nullable=False)
+    usado = Column(Boolean, default=False)
+
+
+# =====================================================================
+# INICIALIZAÇÃO E MIGRAÇÃO AUTOMÁTICA DE COLUNAS (MySQL / PG / SQLite)
+# =====================================================================
+
+def garantir_colunas_autenticacao_2fa():
+    """
+    Garante que todas as colunas novas existam na tabela 'usuarios' mesmo se a tabela
+    já tiver sido criada anteriormente no MySQL Workbench, PostgreSQL ou SQLite.
+    """
+    url_str = str(engine.url)
+    eh_postgres = url_str.startswith("postgresql")
+    tipo_data = "TIMESTAMP NULL" if eh_postgres else "DATETIME NULL"
+    default_bool = "TRUE" if eh_postgres else "1"
+
+    comandos_migracao = [
+        "ALTER TABLE usuarios ADD COLUMN telegram_username VARCHAR(64) NULL",
+        "ALTER TABLE usuarios ADD COLUMN telegram_id VARCHAR(64) NULL",
+        "ALTER TABLE usuarios ADD COLUMN telegram_chat_id VARCHAR(64) NULL",
+        "ALTER TABLE usuarios ADD COLUMN telefone_whatsapp VARCHAR(32) NULL",
+        "ALTER TABLE usuarios ADD COLUMN numero_bot_whatsapp VARCHAR(32) NULL",
+        f"ALTER TABLE usuarios ADD COLUMN primeiro_login BOOLEAN DEFAULT {default_bool}",
+        "ALTER TABLE usuarios ADD COLUMN codigo_2fa VARCHAR(10) NULL",
+        f"ALTER TABLE usuarios ADD COLUMN expira_2fa {tipo_data}",
+        "ALTER TABLE usuarios ADD COLUMN token_reset_senha VARCHAR(128) NULL",
+        f"ALTER TABLE usuarios ADD COLUMN expira_reset_senha {tipo_data}",
+        "ALTER TABLE fixed_expenses ADD COLUMN category VARCHAR(100) DEFAULT 'Moradia'"
     ]
 
-    with engine.begin() as conn:
-        for sql in queries_criacao:
-            conn.execute(text(sql))
+    for cmd in comandos_migracao:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(cmd))
+        except Exception:
+            # Ignora silenciosamente se a coluna já existir
+            pass
 
 
-def formatar_telegram(handle: str) -> str:
-    if not handle:
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    garantir_colunas_autenticacao_2fa()
+
+
+# =====================================================================
+# FUNÇÕES AUXILIARES DE FORMATAÇÃO
+# =====================================================================
+
+def normalizar_username_telegram(telegram: str) -> str:
+    limpo = (telegram or "").strip().lstrip("@").strip()
+    return f"@{limpo.lower()}" if limpo else ""
+
+
+def mascarar_email(email: str) -> str:
+    if not email or "@" not in email:
+        return email or ""
+    usuario, dominio = email.split("@", 1)
+    prefixo = usuario[:2] if len(usuario) > 2 else usuario[:1]
+    return f"{prefixo}***@{dominio}"
+
+
+def formatar_telefone_e164(telefone: str) -> str:
+    if not telefone:
         return ""
-    limpo = handle.strip().lower()
-    return limpo if limpo.startswith("@") else f"@{limpo}"
-
-
-def montar_objeto_usuario(row) -> dict:
-    nome_real = getattr(row, "nome", None)
-    email_real = getattr(row, "email", "")
-    tg_real = getattr(row, "telegram_username", "")
-
-    if not nome_real or str(nome_real).strip().lower() in ("", "none", "usuário", "usuario"):
-        if email_real and "@" in email_real:
-            nome_real = email_real.split("@")[0].capitalize()
-        elif tg_real:
-            nome_real = tg_real.lstrip("@").capitalize()
-        else:
-            nome_real = "Usuário"
-
-    return {
-        "id": row.id,
-        "nome": nome_real,
-        "username": nome_real,
-        "name": nome_real,
-        "email": email_real,
-        "telegram_username": tg_real,
-        "primeiro_login": getattr(row, "primeiro_login", 0),
-        "criado_em": str(getattr(row, "criado_em", "")),
-        "atualizado_em": str(getattr(row, "atualizado_em", ""))
-    }
+    digitos = re.sub(r"\D", "", str(telefone))
+    if not digitos:
+        return ""
+    if len(digitos) in (10, 11) and not digitos.startswith("55"):
+        digitos = "55" + digitos
+    if len(digitos) < 12 or len(digitos) > 15:
+        return ""
+    return f"+{digitos}"
 
 
 # =====================================================================
-# 2. FUNÇÕES DE AUTENTICAÇÃO E CADASTRO (TODAS AS EXIGIDAS PELO MAIN.PY)
+# AUTENTICAÇÃO, CADASTRO COM @TELEGRAM OBRIGATÓRIO E 2FA
 # =====================================================================
 
-def criar_usuario(nome: str, email: str, senha: str, telegram_username: str = "") -> dict:
-    return registrar_usuario_hibrido(nome, email, senha, telegram_username)
+def criar_usuario_com_telegram_obrigatorio(
+    nome: str,
+    email: str,
+    senha_plana: str,
+    telegram: str,
+    telegram_id: str = None
+) -> dict:
+    garantir_colunas_autenticacao_2fa()
+    email_limpo = (email or "").strip().lower()
+    telegram_limpo = normalizar_username_telegram(telegram)
+    tg_id_limpo = (str(telegram_id).strip() if telegram_id else None) or None
 
+    if not telegram_limpo:
+        return {"sucesso": False, "erro": "O @Telegram é obrigatório para realizar o cadastro."}
 
-def criar_usuario_com_telegram_obrigatorio(nome: str, email: str, senha: str, telegram_username: str) -> dict:
-    if not telegram_username or not telegram_username.strip():
-        return {"sucesso": False, "erro": "O @ do Telegram é obrigatório para o cadastro."}
-    return registrar_usuario_hibrido(nome, email, senha, telegram_username)
-
-
-def registrar_usuario_hibrido(nome: str, email: str, senha: str, telegram_username: str) -> dict:
-    db = get_db()
+    senha_hash = generate_password_hash(senha_plana, method="pbkdf2:sha256", salt_length=16)
+    db = SessionLocal()
     try:
-        nome_limpo = (nome or "").strip()
-        email_limpo = (email or "").strip().lower()
-        tg_limpo = formatar_telegram(telegram_username)
-
-        if not nome_limpo or not email_limpo or not senha:
-            return {"sucesso": False, "erro": "Preencha nome, e-mail e senha."}
-
         existente = db.execute(
             text("""
                 SELECT id FROM usuarios
-                WHERE lower(email) = :email OR (:tg != '' AND lower(telegram_username) = :tg)
+                WHERE lower(email) = :email
+                   OR lower(telegram_username) = :tg
+                   OR lower(telegram_username) = :tg_sem
             """),
-            {"email": email_limpo, "tg": tg_limpo}
+            {
+                "email": email_limpo,
+                "tg": telegram_limpo,
+                "tg_sem": telegram_limpo.lstrip("@")
+            }
         ).fetchone()
 
         if existente:
-            return {"sucesso": False, "erro": "E-mail ou @Telegram já cadastrado no sistema."}
+            return {"sucesso": False, "erro": "E-mail ou @Telegram já está vinculado a outra conta."}
 
-        senha_hash = generate_password_hash(senha)
-        agora = datetime.now()
-
-        db.execute(
-            text("""
-                INSERT INTO usuarios
-                (nome, email, senha_hash, telegram_username, primeiro_login, status_2fa, criado_em, atualizado_em)
-                VALUES (:nome, :email, :senha_hash, :tg, 1, 0, :agora, :agora)
-            """),
-            {
-                "nome": nome_limpo,
-                "email": email_limpo,
-                "senha_hash": senha_hash,
-                "tg": tg_limpo,
-                "agora": agora
-            }
+        novo_usuario = User(
+            nome=nome.strip(),
+            email=email_limpo,
+            senha_hash=senha_hash,
+            telegram_username=telegram_limpo,
+            telegram_id=tg_id_limpo,
+            telegram_chat_id=tg_id_limpo,
+            primeiro_login=True
         )
+        db.add(novo_usuario)
         db.commit()
-        return {"sucesso": True, "mensagem": "Cadastro realizado com sucesso!"}
+        db.refresh(novo_usuario)
+
+        return {
+            "sucesso": True,
+            "id": novo_usuario.id,
+            "telegram_username": novo_usuario.telegram_username,
+            "telegram_id": novo_usuario.telegram_id
+        }
     except Exception as e:
         db.rollback()
-        return {"sucesso": False, "erro": f"Erro ao cadastrar: {str(e)}"}
+        return {"sucesso": False, "erro": f"Erro ao cadastrar usuário no banco: {e}"}
     finally:
         db.close()
 
 
-def autenticar_usuario(email_ou_tg: str, senha: str):
-    return iniciar_login_hibrido(email_ou_tg, senha)
+def criar_usuario(nome: str, email: str, senha_plana: str, telefone_whatsapp: str = None, telegram: str = None) -> dict:
+    tg = telegram or telefone_whatsapp or f"@{email.split('@')[0]}"
+    return criar_usuario_com_telegram_obrigatorio(nome, email, senha_plana, tg)
 
 
-def iniciar_login_hibrido(identificador: str, senha: str) -> dict:
-    db = get_db()
+def iniciar_login_hibrido(identificador: str, senha_plana: str) -> dict:
+    garantir_colunas_autenticacao_2fa()
+    ident_limpo = (identificador or "").strip()
+    if not ident_limpo:
+        return {"sucesso": False, "erro": "Informe seu E-mail ou @Telegram."}
+
+    busca_tg_com = normalizar_username_telegram(ident_limpo)
+    busca_tg_sem = busca_tg_com.lstrip("@")
+
+    db = SessionLocal()
     try:
-        ident_limpo = (identificador or "").strip().lower()
-        tg_busca = formatar_telegram(ident_limpo)
-
         user = db.execute(
             text("""
-                SELECT id, nome, email, senha_hash, telegram_username, primeiro_login, criado_em, atualizado_em
+                SELECT id, nome, email, senha_hash, telegram_username, telegram_id, primeiro_login
                 FROM usuarios
-                WHERE lower(email) = :email OR lower(telegram_username) = :tg
+                WHERE lower(email) = :ident
+                   OR lower(telegram_username) = :tg_com
+                   OR lower(telegram_username) = :tg_sem
             """),
-            {"email": ident_limpo, "tg": tg_busca}
+            {
+                "ident": ident_limpo.lower(),
+                "tg_com": busca_tg_com,
+                "tg_sem": busca_tg_sem
+            }
         ).fetchone()
 
-        if not user or not check_password_hash(user.senha_hash, senha):
-            return {"sucesso": False, "erro": "Credenciais inválidas."}
+        if not user:
+            return {"sucesso": False, "erro": "Usuário não encontrado com este E-mail ou @Telegram."}
 
-        dados_usuario = montar_objeto_usuario(user)
+        if not check_password_hash(user.senha_hash, senha_plana):
+            return {"sucesso": False, "erro": "Senha incorreta."}
 
-        if user.primeiro_login == 1:
-            codigo = f"{secrets.randbelow(900000) + 100000}"
-            expiracao = datetime.now() + timedelta(minutes=15)
-            agora = datetime.now()
-
+        if user.primeiro_login is None or bool(user.primeiro_login) is True:
+            codigo = f"{random.randint(100000, 999999)}"
+            expira = datetime.utcnow() + timedelta(minutes=10)
             db.execute(
-                text("""
-                    UPDATE usuarios
-                    SET codigo_2fa = :codigo, expiracao_2fa = :exp, atualizado_em = :agora
-                    WHERE id = :uid
-                """),
-                {"codigo": codigo, "exp": expiracao, "agora": agora, "uid": user.id}
+                text("UPDATE usuarios SET codigo_2fa = :cod, expira_2fa = :exp WHERE id = :uid"),
+                {"cod": codigo, "exp": expira, "uid": user.id}
             )
             db.commit()
-
             return {
                 "sucesso": True,
                 "requer_2fa": True,
+                "codigo_gerado": codigo,
+                "email_destino": user.email,
                 "email": user.email,
-                "codigo_2fa_gerado": codigo,
-                "usuario": dados_usuario
+                "email_mascarado": mascarar_email(user.email),
+                "nome": user.nome,
+                "identificador": user.email
             }
 
         return {
             "sucesso": True,
             "requer_2fa": False,
-            "usuario": dados_usuario,
-            "user": dados_usuario
+            "usuario": {
+                "id": user.id,
+                "nome": user.nome,
+                "email": user.email,
+                "telegram": user.telegram_username,
+                "telegram_id": user.telegram_id
+            }
+        }
+    finally:
+        db.close()
+
+
+def autenticar_usuario(email: str, senha_plana: str) -> dict:
+    return iniciar_login_hibrido(email, senha_plana)
+
+
+def validar_codigo_2fa_banco(identificador: str, codigo: str) -> dict:
+    garantir_colunas_autenticacao_2fa()
+    ident_limpo = (identificador or "").strip().lower()
+    busca_tg_com = normalizar_username_telegram(ident_limpo)
+    codigo_limpo = (codigo or "").strip()
+
+    db = SessionLocal()
+    try:
+        user = db.execute(
+            text("""
+                SELECT id, nome, email, telegram_username, telegram_id, codigo_2fa, expira_2fa
+                FROM usuarios
+                WHERE lower(email) = :ident OR lower(telegram_username) = :tg_com
+            """),
+            {"ident": ident_limpo, "tg_com": busca_tg_com}
+        ).fetchone()
+
+        if not user or not user.codigo_2fa:
+            return {"sucesso": False, "erro": "Nenhuma verificação 2FA pendente para este usuário."}
+
+        if str(user.codigo_2fa).strip() != codigo_limpo:
+            return {"sucesso": False, "erro": "Código de verificação de 6 dígitos incorreto."}
+
+        db.execute(
+            text("UPDATE usuarios SET primeiro_login = :falso, codigo_2fa = NULL, expira_2fa = NULL WHERE id = :uid"),
+            {"falso": False, "uid": user.id}
+        )
+        db.commit()
+
+        return {
+            "sucesso": True,
+            "usuario": {
+                "id": user.id,
+                "nome": user.nome,
+                "email": user.email,
+                "telegram": user.telegram_username,
+                "telegram_id": user.telegram_id
+            }
+        }
+    finally:
+        db.close()
+
+
+def reenviar_codigo_2fa_banco(identificador: str) -> dict:
+    garantir_colunas_autenticacao_2fa()
+    ident_limpo = (identificador or "").strip().lower()
+    busca_tg_com = normalizar_username_telegram(ident_limpo)
+
+    db = SessionLocal()
+    try:
+        user = db.execute(
+            text("""
+                SELECT id, nome, email FROM usuarios
+                WHERE lower(email) = :ident OR lower(telegram_username) = :tg_com
+            """),
+            {"ident": ident_limpo, "tg_com": busca_tg_com}
+        ).fetchone()
+
+        if not user:
+            return {"sucesso": False, "erro": "Usuário não localizado."}
+
+        codigo = f"{random.randint(100000, 999999)}"
+        expira = datetime.utcnow() + timedelta(minutes=10)
+        db.execute(
+            text("UPDATE usuarios SET codigo_2fa = :cod, expira_2fa = :exp WHERE id = :uid"),
+            {"cod": codigo, "exp": expira, "uid": user.id}
+        )
+        db.commit()
+        return {
+            "sucesso": True,
+            "codigo_gerado": codigo,
+            "email_destino": user.email,
+            "email_mascarado": mascarar_email(user.email),
+            "nome": user.nome
+        }
+    finally:
+        db.close()
+
+
+def gerar_token_recuperacao_senha(identificador: str) -> dict:
+    garantir_colunas_autenticacao_2fa()
+    ident_limpo = (identificador or "").strip().lower()
+    busca_tg_com = normalizar_username_telegram(ident_limpo)
+
+    db = SessionLocal()
+    try:
+        user = db.execute(
+            text("""
+                SELECT id, nome, email FROM usuarios
+                WHERE lower(email) = :ident OR lower(telegram_username) = :tg_com
+            """),
+            {"ident": ident_limpo, "tg_com": busca_tg_com}
+        ).fetchone()
+
+        if not user:
+            return {"sucesso": False, "erro": "Nenhuma conta encontrada com este E-mail ou @Telegram."}
+
+        # Gera um token seguro de URL para o link de redefinição
+        token = secrets.token_urlsafe(24)
+        expira = datetime.utcnow() + timedelta(minutes=15)
+        db.execute(
+            text("UPDATE usuarios SET token_reset_senha = :tok, expira_reset_senha = :exp WHERE id = :uid"),
+            {"tok": token, "exp": expira, "uid": user.id}
+        )
+        db.commit()
+        return {
+            "sucesso": True,
+            "token": token,
+            "email": user.email,
+            "email_destino": user.email,
+            "email_mascarado": mascarar_email(user.email),
+            "nome": user.nome
         }
     except Exception as e:
         db.rollback()
-        return {"sucesso": False, "erro": f"Erro no login: {str(e)}"}
+        return {"sucesso": False, "erro": f"Erro ao gerar link de recuperação: {e}"}
     finally:
         db.close()
 
 
-def validar_codigo_2fa_banco(identificador_ou_email: str, codigo: str) -> dict:
-    db = get_db()
-    try:
-        ident_limpo = (identificador_ou_email or "").strip().lower()
-        tg_busca = formatar_telegram(ident_limpo)
-        codigo_limpo = (codigo or "").strip()
-
-        user = db.execute(
-            text("""
-                SELECT id, nome, email, telegram_username, codigo_2fa, expiracao_2fa, criado_em, atualizado_em
-                FROM usuarios
-                WHERE lower(email) = :email OR lower(telegram_username) = :tg
-            """),
-            {"email": ident_limpo, "tg": tg_busca}
-        ).fetchone()
-
-        if not user or not user.codigo_2fa or user.codigo_2fa != codigo_limpo:
-            return {"sucesso": False, "erro": "Código 2FA inválido."}
-
-        agora = datetime.now()
-        db.execute(
-            text("""
-                UPDATE usuarios
-                SET primeiro_login = 0, status_2fa = 1, codigo_2fa = NULL, expiracao_2fa = NULL, atualizado_em = :agora
-                WHERE id = :uid
-            """),
-            {"agora": agora, "uid": user.id}
-        )
-        db.commit()
-
-        dados_usuario = montar_objeto_usuario(user)
-        return {"sucesso": True, "usuario": dados_usuario, "user": dados_usuario}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": f"Erro 2FA: {str(e)}"}
-    finally:
-        db.close()
-
-
-def obter_usuario_por_id(user_id: int) -> dict:
-    db = get_db()
-    try:
-        user = db.execute(
-            text("SELECT id, nome, email, telegram_username, primeiro_login, criado_em, atualizado_em FROM usuarios WHERE id = :uid"),
-            {"uid": user_id}
-        ).fetchone()
-        if not user:
-            return {"id": None, "nome": "Usuário", "username": "Usuário"}
-        return montar_objeto_usuario(user)
-    finally:
-        db.close()
-
-
-def atualizar_configuracoes_usuario(user_id: int, nome: str, telegram_username: str) -> dict:
-    db = get_db()
-    try:
-        agora = datetime.now()
-        db.execute(
-            text("""
-                UPDATE usuarios
-                SET nome = :nome, telegram_username = :tg, atualizado_em = :agora
-                WHERE id = :uid
-            """),
-            {"nome": nome, "tg": formatar_telegram(telegram_username), "agora": agora, "uid": user_id}
-        )
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-# =====================================================================
-# 3. RECUPERAÇÃO DE SENHA
-# =====================================================================
-
-def gerar_token_recuperacao_senha(email: str) -> dict:
-    db = get_db()
-    try:
-        email_limpo = email.strip().lower()
-        user = db.execute(text("SELECT id FROM usuarios WHERE lower(email) = :email"), {"email": email_limpo}).fetchone()
-        if not user:
-            return {"sucesso": False, "erro": "E-mail não encontrado."}
-
-        token = secrets.token_urlsafe(32)
-        expira = datetime.now() + timedelta(hours=1)
-        agora = datetime.now()
-
-        db.execute(
-            text("""
-                UPDATE usuarios
-                SET token_recuperacao = :token, expiracao_recuperacao = :exp, atualizado_em = :agora
-                WHERE id = :uid
-            """),
-            {"token": token, "exp": expira, "agora": agora, "uid": user.id}
-        )
-        db.commit()
-        return {"sucesso": True, "token": token}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def redefinir_senha_com_token(token: str, nova_senha: str) -> dict:
-    db = get_db()
-    try:
-        user = db.execute(
-            text("SELECT id, expiracao_recuperacao FROM usuarios WHERE token_recuperacao = :token"),
-            {"token": token}
-        ).fetchone()
-
-        if not user or (user.expiracao_recuperacao and datetime.now() > user.expiracao_recuperacao):
-            return {"sucesso": False, "erro": "Token inválido ou expirado."}
-
-        senha_hash = generate_password_hash(nova_senha)
-        agora = datetime.now()
-
-        db.execute(
-            text("""
-                UPDATE usuarios
-                SET senha_hash = :hash, token_recuperacao = NULL, expiracao_recuperacao = NULL, atualizado_em = :agora
-                WHERE id = :uid
-            """),
-            {"hash": senha_hash, "agora": agora, "uid": user.id}
-        )
-        db.commit()
-        return {"sucesso": True, "mensagem": "Senha redefinida com sucesso!"}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-# =====================================================================
-# 4. MÓDULO FINANCEIRO E HISTÓRICO DE MENSAGENS
-# =====================================================================
-
-def registrar_transacao(user_id: int, descricao: str, valor: float, tipo: str, categoria: str = "Outros") -> dict:
-    db = get_db()
-    try:
-        agora = datetime.now()
-        db.execute(
-            text("""
-                INSERT INTO transacoes (usuario_id, descricao, valor, tipo, categoria, data, criado_em, atualizado_em)
-                VALUES (:uid, :desc, :val, :tipo, :cat, :agora, :agora, :agora)
-            """),
-            {"uid": user_id, "desc": descricao, "val": valor, "tipo": tipo, "cat": categoria, "agora": agora}
-        )
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def listar_transacoes(user_id: int) -> list:
-    db = get_db()
-    try:
-        res = db.execute(
-            text("SELECT id, descricao, valor, tipo, categoria, data, criado_em FROM transacoes WHERE usuario_id = :uid ORDER BY data DESC"),
-            {"uid": user_id}
-        ).fetchall()
-        return [dict(row._mapping) for row in res]
-    finally:
-        db.close()
-
-
-def obter_resumo_financeiro(user_id: int) -> dict:
-    trans = listar_transacoes(user_id)
-    receitas = sum(t["valor"] for t in trans if t["tipo"].lower() in ("receita", "income"))
-    despesas = sum(t["valor"] for t in trans if t["tipo"].lower() in ("despesa", "expense"))
-    return {"receitas": receitas, "despesas": despesas, "saldo": receitas - despesas}
-
-
-def criar_renda_fixa(user_id: int, descricao: str, valor: float, dia_recebimento: int) -> dict:
-    db = get_db()
-    try:
-        agora = datetime.now()
-        db.execute(
-            text("""
-                INSERT INTO receitas_fixas (usuario_id, descricao, valor, dia_recebimento, criado_em, atualizado_em)
-                VALUES (:uid, :desc, :val, :dia, :agora, :agora)
-            """),
-            {"uid": user_id, "desc": descricao, "val": valor, "dia": dia_recebimento, "agora": agora}
-        )
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def listar_rendas_fixas(user_id: int) -> list:
-    db = get_db()
-    try:
-        res = db.execute(text("SELECT * FROM receitas_fixas WHERE usuario_id = :uid"), {"uid": user_id}).fetchall()
-        return [dict(row._mapping) for row in res]
-    finally:
-        db.close()
-
-
-def atualizar_renda_fixa(id_renda: int, user_id: int, descricao: str, valor: float, dia_recebimento: int) -> dict:
-    db = get_db()
-    try:
-        agora = datetime.now()
-        db.execute(
-            text("UPDATE receitas_fixas SET descricao=:desc, valor=:val, dia_recebimento=:dia, atualizado_em=:agora WHERE id=:id AND usuario_id=:uid"),
-            {"desc": descricao, "val": valor, "dia": dia_recebimento, "agora": agora, "id": id_renda, "uid": user_id}
-        )
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def deletar_renda_fixa(id_renda: int, user_id: int) -> dict:
-    db = get_db()
-    try:
-        db.execute(text("DELETE FROM receitas_fixas WHERE id=:id AND usuario_id=:uid"), {"id": id_renda, "uid": user_id})
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def criar_gasto_fixo(user_id: int, descricao: str, valor: float, dia_vencimento: int, categoria: str = "Fixas") -> dict:
-    db = get_db()
-    try:
-        agora = datetime.now()
-        db.execute(
-            text("""
-                INSERT INTO despesas_fixas (usuario_id, descricao, valor, dia_vencimento, categoria, criado_em, atualizado_em)
-                VALUES (:uid, :desc, :val, :dia, :cat, :agora, :agora)
-            """),
-            {"uid": user_id, "desc": descricao, "val": valor, "dia": dia_vencimento, "cat": categoria, "agora": agora}
-        )
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def listar_gastos_fixos(user_id: int) -> list:
-    db = get_db()
-    try:
-        res = db.execute(text("SELECT * FROM despesas_fixas WHERE usuario_id = :uid"), {"uid": user_id}).fetchall()
-        return [dict(row._mapping) for row in res]
-    finally:
-        db.close()
-
-
-def atualizar_gasto_fixo(id_gasto: int, user_id: int, descricao: str, valor: float, dia_vencimento: int) -> dict:
-    db = get_db()
-    try:
-        agora = datetime.now()
-        db.execute(
-            text("UPDATE despesas_fixas SET descricao=:desc, valor=:val, dia_vencimento=:dia, atualizado_em=:agora WHERE id=:id AND usuario_id=:uid"),
-            {"desc": descricao, "val": valor, "dia": dia_vencimento, "agora": agora, "id": id_gasto, "uid": user_id}
-        )
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def deletar_gasto_fixo(id_gasto: int, user_id: int) -> dict:
-    db = get_db()
-    try:
-        db.execute(text("DELETE FROM despesas_fixas WHERE id=:id AND usuario_id=:uid"), {"id": id_gasto, "uid": user_id})
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def salvar_mensagem_historico(user_id: int, mensagem: str, resposta: str) -> dict:
-    db = get_db()
-    try:
-        agora = datetime.now()
-        db.execute(
-            text("""
-                INSERT INTO historico_mensagens (usuario_id, mensagem, resposta, criado_em, atualizado_em)
-                VALUES (:uid, :msg, :resp, :agora, :agora)
-            """),
-            {"uid": user_id, "msg": mensagem, "resp": resposta, "agora": agora}
-        )
-        db.commit()
-        return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
-    finally:
-        db.close()
-
-
-def listar_historico_mensagens(user_id: int) -> list:
-    db = get_db()
-    try:
-        res = db.execute(
-            text("SELECT mensagem, resposta, criado_em FROM historico_mensagens WHERE usuario_id = :uid ORDER BY criado_em DESC LIMIT 50"),
-            {"uid": user_id}
-        ).fetchall()
-        return [dict(row._mapping) for row in res]
-    finally:
-        db.close()
-
-
-def gerar_token_mobile(user_id: int) -> str:
-    db = get_db()
-    try:
-        token = secrets.token_urlsafe(32)
-        expira = datetime.now() + timedelta(days=30)
-        agora = datetime.now()
-        db.execute(
-            text("INSERT INTO tokens_mobile (usuario_id, token, expira_em, criado_em, atualizado_em) VALUES (:uid, :token, :exp, :agora, :agora)"),
-            {"uid": user_id, "token": token, "exp": expira, "agora": agora}
-        )
-        db.commit()
-        return token
-    except Exception:
-        db.rollback()
-        return ""
-    finally:
-        db.close()
-
-
-def validar_e_consumir_token_mobile(token: str) -> int:
-    db = get_db()
-    try:
-        res = db.execute(
-            text("SELECT usuario_id, expira_em FROM tokens_mobile WHERE token = :token"),
-            {"token": token}
-        ).fetchone()
-        if not res or (res.expira_em and datetime.now() > res.expira_em):
-            return None
-        return res.usuario_id
-    finally:
-        db.close()
-
-def obter_ou_vincular_usuario_telegram(chat_id: str, username: str = None, first_name: str = "Usuário Telegram", token_vinculo: str = None) -> dict:
+def redefinir_senha_com_token(token_ou_identificador: str, nova_senha: str, nova_senha_opcional: str = None) -> dict:
     """
-    Localiza o usuário pelo telegram_chat_id, ou vincula via token (/start TOKEN),
-    ou vincula pelo telegram_username, ou cria um perfil integrado automaticamente.
+    Suporta tanto a chamada com 2 argumentos (token, nova_senha) vinda do link do e-mail
+    quanto a chamada antiga com 3 argumentos (identificador, token, nova_senha).
     """
+    garantir_colunas_autenticacao_2fa()
+
+    if nova_senha_opcional is not None:
+        token_limpo = (nova_senha or "").strip()
+        senha_final = nova_senha_opcional
+    else:
+        token_limpo = (token_ou_identificador or "").strip()
+        senha_final = nova_senha
+
+    if not token_limpo:
+        return {"sucesso": False, "erro": "Token de recuperação ausente ou inválido."}
+
+    if not senha_final or len(senha_final) < 6:
+        return {"sucesso": False, "erro": "A nova senha deve ter no mínimo 6 caracteres."}
+
     db = SessionLocal()
     try:
-        chat_id_str = str(chat_id).strip()
-        clean_username = username.strip().lstrip("@") if username else None
+        user = db.execute(
+            text("SELECT id, expira_reset_senha FROM usuarios WHERE token_reset_senha = :tok"),
+            {"tok": token_limpo}
+        ).fetchone()
 
-        # 1. Se enviou token via comando /start <token>, vincula diretamente à conta web
-        if token_vinculo:
-            reg_token = db.query(MobileToken).filter(
-                MobileToken.token == token_vinculo,
-                MobileToken.usado == False,
-                MobileToken.expira_em >= datetime.utcnow()
-            ).first()
-            if reg_token:
-                usuario_web = db.query(User).filter(User.id == reg_token.user_id).first()
-                if usuario_web:
-                    # Libera o chat_id caso estivesse em conta temporária
-                    antigo = db.query(User).filter(User.telegram_chat_id == chat_id_str, User.id != usuario_web.id).first()
-                    if antigo:
-                        antigo.telegram_chat_id = None
-                    usuario_web.telegram_chat_id = chat_id_str
-                    if clean_username:
-                        usuario_web.telegram_username = clean_username
-                    reg_token.usado = True
-                    db.commit()
-                    return {"id": usuario_web.id, "nome": usuario_web.name, "email": usuario_web.email, "vinculado_agora": True}
+        if not user:
+            return {"sucesso": False, "erro": "Link de recuperação inválido ou já utilizado."}
 
-        # 2. Busca direta por telegram_chat_id
-        user = db.query(User).filter(User.telegram_chat_id == chat_id_str).first()
-        if user:
-            if clean_username and user.telegram_username != clean_username:
-                user.telegram_username = clean_username
-                db.commit()
-            return {"id": user.id, "nome": user.name, "email": user.email, "vinculado_agora": False}
-
-        # 3. Busca por telegram_username preenchido previamente na aba Configurações
-        if clean_username:
-            user_by_uname = db.query(User).filter(
-                func.lower(User.telegram_username) == clean_username.lower()
-            ).first()
-            if user_by_uname:
-                user_by_uname.telegram_chat_id = chat_id_str
-                db.commit()
-                return {"id": user_by_uname.id, "nome": user_by_uname.name, "email": user_by_uname.email, "vinculado_agora": True}
-
-        # 4. Cria conta automática vinculada ao Telegram (RN03)
-        email_temp = f"tg_{chat_id_str}@telegram.financecontrol.local"
-        senha_hash = generate_password_hash(chat_id_str, method="pbkdf2:sha256")
-        novo_user = User(
-            name=first_name or "Usuário Telegram",
-            email=email_temp,
-            password_hash=senha_hash,
-            telegram_chat_id=chat_id_str,
-            telegram_username=clean_username
+        novo_hash = generate_password_hash(senha_final, method="pbkdf2:sha256", salt_length=16)
+        db.execute(
+            text("""
+                UPDATE usuarios
+                SET senha_hash = :sh, token_reset_senha = NULL, expira_reset_senha = NULL
+                WHERE id = :uid
+            """),
+            {"sh": novo_hash, "uid": user.id}
         )
-        db.add(novo_user)
         db.commit()
-        db.refresh(novo_user)
-        return {"id": novo_user.id, "nome": novo_user.name, "email": novo_user.email, "vinculado_agora": False}
+        return {"sucesso": True}
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": f"Erro ao salvar nova senha: {e}"}
     finally:
         db.close()
 
 
-# Inicializa o banco automaticamente ao importar
-init_db()
+# =====================================================================
+# VÍNCULO AUTOMÁTICO DO BOT DO TELEGRAM (GRAVA telegram_username E telegram_id)
+# =====================================================================
+
+def obter_ou_vincular_usuario_telegram(
+    chat_id: str,
+    username: str = "",
+    first_name: str = "Usuário Telegram",
+    token_vinculo: str = None
+) -> dict:
+    garantir_colunas_autenticacao_2fa()
+    chat_id_str = str(chat_id).strip()
+    user_com_arroba = normalizar_username_telegram(username)
+    user_sem_arroba = user_com_arroba.lstrip("@")
+
+    db = SessionLocal()
+    try:
+        # 1. Busca pelo telegram_id ou telegram_chat_id já vinculado
+        user = db.execute(
+            text("""
+                SELECT id, nome, email, telegram_username, telegram_id
+                FROM usuarios
+                WHERE telegram_id = :cid OR telegram_chat_id = :cid
+            """),
+            {"cid": chat_id_str}
+        ).fetchone()
+
+        if user:
+            if user_com_arroba and user.telegram_username != user_com_arroba:
+                db.execute(
+                    text("UPDATE usuarios SET telegram_username = :tg WHERE id = :uid"),
+                    {"tg": user_com_arroba, "uid": user.id}
+                )
+                db.commit()
+            return {
+                "id": user.id,
+                "nome": user.nome,
+                "email": user.email,
+                "telegram_username": user.telegram_username or user_com_arroba,
+                "telegram_id": chat_id_str,
+                "vinculado_agora": False
+            }
+
+        # 2. Busca pelo @telegram_username cadastrado na Web e grava o telegram_id no MySQL
+        if user_com_arroba:
+            user = db.execute(
+                text("""
+                    SELECT id, nome, email, telegram_username
+                    FROM usuarios
+                    WHERE lower(telegram_username) = :tg_com
+                       OR lower(telegram_username) = :tg_sem
+                """),
+                {"tg_com": user_com_arroba, "tg_sem": user_sem_arroba}
+            ).fetchone()
+
+            if user:
+                db.execute(
+                    text("""
+                        UPDATE usuarios
+                        SET telegram_id = :cid,
+                            telegram_chat_id = :cid,
+                            telegram_username = :tg_com
+                        WHERE id = :uid
+                    """),
+                    {"cid": chat_id_str, "tg_com": user_com_arroba, "uid": user.id}
+                )
+                db.commit()
+                return {
+                    "id": user.id,
+                    "nome": user.nome,
+                    "email": user.email,
+                    "telegram_username": user_com_arroba,
+                    "telegram_id": chat_id_str,
+                    "vinculado_agora": True
+                }
+
+        # 3. Fallback: cria usuário se iniciou conversa direto no Bot
+        email_temp = f"{chat_id_str}@telegram.local"
+        senha_hash = generate_password_hash(chat_id_str, method="pbkdf2:sha256")
+        novo = User(
+            nome=first_name,
+            email=email_temp,
+            senha_hash=senha_hash,
+            telegram_username=user_com_arroba or None,
+            telegram_id=chat_id_str,
+            telegram_chat_id=chat_id_str,
+            primeiro_login=False
+        )
+        db.add(novo)
+        db.commit()
+        db.refresh(novo)
+        return {
+            "id": novo.id,
+            "nome": novo.nome,
+            "email": novo.email,
+            "telegram_username": novo.telegram_username,
+            "telegram_id": chat_id_str,
+            "vinculado_agora": True
+        }
+    finally:
+        db.close()
+
+
+def obter_usuario_por_id(usuario_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == usuario_id).first()
+        if not user:
+            return None
+        return {
+            "id": user.id,
+            "nome": user.nome,
+            "email": user.email,
+            "telegram_username": user.telegram_username or "",
+            "telegram_id": user.telegram_id or user.telegram_chat_id or "",
+            "telefone_whatsapp": user.telefone_whatsapp or "",
+            "numero_bot_whatsapp": user.numero_bot_whatsapp or "",
+            "data_criacao": user.data_criacao.strftime("%Y-%m-%d %H:%M:%S") if user.data_criacao else ""
+        }
+    finally:
+        db.close()
+
+
+def atualizar_configuracoes_usuario(
+    usuario_id: int,
+    nome: str,
+    telefone_whatsapp: str = None,
+    numero_bot_whatsapp: str = None,
+    telegram_username: str = None,
+    telegram_id: str = None
+) -> dict:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == usuario_id).first()
+        if not user:
+            return {"sucesso": False, "erro": "Usuário não encontrado."}
+
+        if nome:
+            user.nome = nome.strip()
+        if telegram_username:
+            user.telegram_username = normalizar_username_telegram(telegram_username)
+        if telegram_id:
+            user.telegram_id = str(telegram_id).strip()
+            user.telegram_chat_id = str(telegram_id).strip()
+        if telefone_whatsapp is not None:
+            user.telefone_whatsapp = formatar_telefone_e164(telefone_whatsapp) or None
+        if numero_bot_whatsapp is not None:
+            user.numero_bot_whatsapp = formatar_telefone_e164(numero_bot_whatsapp) or None
+
+        db.commit()
+        return {
+            "sucesso": True,
+            "telegram_username": user.telegram_username,
+            "telegram_id": user.telegram_id
+        }
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": f"Erro ao atualizar configurações: {e}"}
+    finally:
+        db.close()
+
+
+# =====================================================================
+# TOKENS MOBILE (QR CODE) E HISTÓRICO DO CHAT IA
+# =====================================================================
+
+def gerar_token_mobile(usuario_id: int, minutos_validade: int = 10) -> dict:
+    token = secrets.token_urlsafe(32)
+    expira_em = datetime.utcnow() + timedelta(minutes=minutos_validade)
+    db = SessionLocal()
+    try:
+        db.query(MobileToken).filter(
+            MobileToken.user_id == usuario_id,
+            MobileToken.usado == False
+        ).update({"usado": True})
+
+        novo_token = MobileToken(
+            user_id=usuario_id,
+            token=token,
+            expira_em=expira_em,
+            usado=False
+        )
+        db.add(novo_token)
+        db.commit()
+        return {"token": token, "validade_segundos": minutos_validade * 60}
+    finally:
+        db.close()
+
+
+def validar_e_consumir_token_mobile(token: str) -> dict:
+    agora = datetime.utcnow()
+    db = SessionLocal()
+    try:
+        reg = db.query(MobileToken).filter(MobileToken.token == token).first()
+        if not reg:
+            return {"sucesso": False, "erro": "QR Code inválido ou não encontrado."}
+        if reg.usado:
+            return {"sucesso": False, "erro": "Este QR Code já foi utilizado."}
+        if reg.expira_em < agora:
+            return {"sucesso": False, "erro": "Este QR Code expirou."}
+
+        reg.usado = True
+        user = db.query(User).filter(User.id == reg.user_id).first()
+        db.commit()
+        return {
+            "sucesso": True,
+            "usuario": {
+                "id": user.id,
+                "nome": user.nome,
+                "email": user.email,
+                "telegram": user.telegram_username
+            }
+        }
+    finally:
+        db.close()
+
+
+def salvar_mensagem_historico(usuario_id: int, remetente: str, mensagem: str):
+    db = SessionLocal()
+    try:
+        msg = ChatMessage(user_id=usuario_id, remetente=remetente, mensagem=mensagem)
+        db.add(msg)
+        db.commit()
+    finally:
+        db.close()
+
+
+def listar_historico_mensagens(usuario_id: int, limite: int = 50) -> list:
+    db = SessionLocal()
+    try:
+        msgs = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.user_id == usuario_id)
+            .order_by(ChatMessage.id.desc())
+            .limit(limite)
+            .all()
+        )
+        msgs.reverse()
+        return [
+            {
+                "id": m.id,
+                "remetente": m.remetente,
+                "mensagem": m.mensagem,
+                "data_envio": m.data_envio.strftime("%Y-%m-%d %H:%M:%S") if m.data_envio else ""
+            }
+            for m in msgs
+        ]
+    finally:
+        db.close()
+
+
+# =====================================================================
+# TRANSAÇÕES, RENDAS FIXAS, GASTOS FIXOS E DASHBOARD
+# =====================================================================
+
+def registrar_transacao(
+    usuario_id: int,
+    tipo: str,
+    valor: float,
+    categoria: str,
+    descricao: str = "",
+    moeda: str = "BRL"
+) -> dict:
+    if (moeda or "BRL").upper() != "BRL":
+        return {"sucesso": False, "erro": "Operação negada (RN04): O sistema opera exclusivamente em Real (BRL)."}
+    if float(valor) <= 0:
+        return {"sucesso": False, "erro": "O valor deve ser maior que zero."}
+
+    tipo_limpo = (tipo or "").lower().strip()
+    if tipo_limpo not in ("receita", "despesa"):
+        return {"sucesso": False, "erro": "Tipo inválido. Use 'receita' ou 'despesa'."}
+
+    resumo_antes = obter_resumo_financeiro(usuario_id)
+    alerta_risco = None
+    if tipo_limpo == "despesa" and float(valor) > resumo_antes["saldo"]:
+        alerta_risco = (
+            f"⚠️ Alerta de Risco (RN02): Esta despesa (R$ {float(valor):.2f}) "
+            f"ultrapassa seu saldo disponível (R$ {resumo_antes['saldo']:.2f})."
+        )
+
+    db = SessionLocal()
+    try:
+        nova = Transaction(
+            user_id=usuario_id,
+            tipo=tipo_limpo,
+            valor=float(valor),
+            categoria=(categoria or "Outros").strip().capitalize(),
+            descricao=(descricao or "").strip(),
+            moeda="BRL",
+            data_transacao=datetime.utcnow()
+        )
+        db.add(nova)
+        db.commit()
+        db.refresh(nova)
+        return {"sucesso": True, "id": nova.id, "alerta": alerta_risco}
+    finally:
+        db.close()
+
+
+def listar_transacoes(usuario_id: int, limite: int = 50) -> list:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Transaction)
+            .filter(Transaction.user_id == usuario_id)
+            .order_by(Transaction.id.desc())
+            .limit(limite)
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "tipo": r.tipo,
+                "valor": float(r.valor),
+                "categoria": r.categoria,
+                "descricao": r.descricao or "",
+                "data_transacao": r.data_transacao.strftime("%Y-%m-%d %H:%M:%S") if r.data_transacao else ""
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def excluir_transacao(usuario_id: int, transacao_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        item = db.query(Transaction).filter(
+            Transaction.id == transacao_id,
+            Transaction.user_id == usuario_id
+        ).first()
+        if not item:
+            return {"sucesso": False, "erro": "Transação não encontrada."}
+        db.delete(item)
+        db.commit()
+        return {"sucesso": True}
+    finally:
+        db.close()
+
+
+def adicionar_renda_fixa(usuario_id: int, descricao: str, valor: float, dia_recebimento: int = 5) -> dict:
+    db = SessionLocal()
+    try:
+        nova = FixedIncome(
+            user_id=usuario_id,
+            description=descricao.strip(),
+            amount=float(valor),
+            day_of_month=max(1, min(31, int(dia_recebimento or 5))),
+            is_active=True
+        )
+        db.add(nova)
+        db.commit()
+        db.refresh(nova)
+        return {"sucesso": True, "id": nova.id}
+    finally:
+        db.close()
+
+
+def listar_rendas_fixas(usuario_id: int) -> list:
+    db = SessionLocal()
+    try:
+        rows = db.query(FixedIncome).filter(
+            FixedIncome.user_id == usuario_id,
+            FixedIncome.is_active == True
+        ).all()
+        return [
+            {
+                "id": r.id,
+                "descricao": r.description,
+                "description": r.description,
+                "valor": float(r.amount),
+                "amount": float(r.amount),
+                "dia": r.day_of_month,
+                "day_of_month": r.day_of_month
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def remover_renda_fixa(usuario_id: int, renda_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        row = db.query(FixedIncome).filter(
+            FixedIncome.id == renda_id,
+            FixedIncome.user_id == usuario_id
+        ).first()
+        if not row:
+            return {"sucesso": False, "erro": "Renda fixa não encontrada."}
+        db.delete(row)
+        db.commit()
+        return {"sucesso": True}
+    finally:
+        db.close()
+
+
+def atualizar_renda_fixa(
+    usuario_id: int,
+    renda_id: int,
+    descricao: str = None,
+    valor: float = None,
+    dia_recebimento: int = None,
+    is_active: bool = None
+) -> dict:
+    """Atualiza os dados de uma renda fixa existente do usuário."""
+    db = SessionLocal()
+    try:
+        renda = db.query(FixedIncome).filter(
+            FixedIncome.id == renda_id,
+            FixedIncome.user_id == usuario_id
+        ).first()
+        
+        if not renda:
+            return {"sucesso": False, "erro": "Renda fixa não encontrada."}
+            
+        if descricao is not None:
+            renda.description = descricao.strip()
+        if valor is not None:
+            renda.amount = float(valor)
+        if dia_recebimento is not None:
+            renda.day_of_month = max(1, min(31, int(dia_recebimento)))
+        if is_active is not None:
+            renda.is_active = bool(is_active)
+            
+        db.commit()
+        return {"sucesso": True, "id": renda.id}
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": f"Erro ao atualizar renda fixa: {str(e)}"}
+    finally:
+        db.close()
+
+
+def atualizar_gasto_fixo(
+    usuario_id: int,
+    gasto_id: int,
+    descricao: str = None,
+    valor: float = None,
+    dia_vencimento: int = None,
+    categoria: str = None,
+    is_active: bool = None
+) -> dict:
+    """Atualiza os dados de um gasto fixo existente do usuário."""
+    db = SessionLocal()
+    try:
+        gasto = db.query(FixedExpense).filter(
+            FixedExpense.id == gasto_id,
+            FixedExpense.user_id == usuario_id
+        ).first()
+        
+        if not gasto:
+            return {"sucesso": False, "erro": "Gasto fixo não encontrado."}
+            
+        if descricao is not None:
+            gasto.description = descricao.strip()
+        if valor is not None:
+            gasto.amount = float(valor)
+        if dia_vencimento is not None:
+            gasto.due_day = max(1, min(31, int(dia_vencimento)))
+        if categoria is not None:
+            gasto.category = categoria.strip().capitalize()
+        if is_active is not None:
+            gasto.is_active = bool(is_active)
+            
+        db.commit()
+        return {"sucesso": True, "id": gasto.id}
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": f"Erro ao atualizar gasto fixo: {str(e)}"}
+    finally:
+        db.close()
+
+
+def adicionar_gasto_fixo(
+    usuario_id: int,
+    descricao: str,
+    valor: float,
+    dia_vencimento: int = 10,
+    categoria: str = "Moradia"
+) -> dict:
+    db = SessionLocal()
+    try:
+        novo = FixedExpense(
+            user_id=usuario_id,
+            description=descricao.strip(),
+            category=(categoria or "Moradia").strip().capitalize(),
+            amount=float(valor),
+            due_day=max(1, min(31, int(dia_vencimento or 10))),
+            is_active=True
+        )
+        db.add(novo)
+        db.commit()
+        db.refresh(novo)
+        return {"sucesso": True, "id": novo.id}
+    finally:
+        db.close()
+
+
+def listar_gastos_fixos(usuario_id: int) -> list:
+    db = SessionLocal()
+    try:
+        rows = db.query(FixedExpense).filter(
+            FixedExpense.user_id == usuario_id,
+            FixedExpense.is_active == True
+        ).all()
+        return [
+            {
+                "id": r.id,
+                "descricao": r.description,
+                "description": r.description,
+                "categoria": getattr(r, "category", "Moradia") or "Moradia",
+                "valor": float(r.amount),
+                "amount": float(r.amount),
+                "dia_vencimento": r.due_day,
+                "due_day": r.due_day
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def remover_gasto_fixo(usuario_id: int, gasto_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        row = db.query(FixedExpense).filter(
+            FixedExpense.id == gasto_id,
+            FixedExpense.user_id == usuario_id
+        ).first()
+        if not row:
+            return {"sucesso": False, "erro": "Gasto fixo não encontrado."}
+        db.delete(row)
+        db.commit()
+        return {"sucesso": True}
+    finally:
+        db.close()
+
+
+def obter_resumo_financeiro(usuario_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        receitas_var = (
+            db.query(func.coalesce(func.sum(Transaction.valor), 0.0))
+            .filter(Transaction.user_id == usuario_id, Transaction.tipo == "receita")
+            .scalar() or 0.0
+        )
+        despesas_var = (
+            db.query(func.coalesce(func.sum(Transaction.valor), 0.0))
+            .filter(Transaction.user_id == usuario_id, Transaction.tipo == "despesa")
+            .scalar() or 0.0
+        )
+        rendas_fixas = (
+            db.query(func.coalesce(func.sum(FixedIncome.amount), 0.0))
+            .filter(FixedIncome.user_id == usuario_id, FixedIncome.is_active == True)
+            .scalar() or 0.0
+        )
+        gastos_fixos = (
+            db.query(func.coalesce(func.sum(FixedExpense.amount), 0.0))
+            .filter(FixedExpense.user_id == usuario_id, FixedExpense.is_active == True)
+            .scalar() or 0.0
+        )
+        total_lancamentos = (
+            db.query(func.count(Transaction.id))
+            .filter(Transaction.user_id == usuario_id)
+            .scalar() or 0
+        )
+
+        cats = (
+            db.query(Transaction.categoria, func.sum(Transaction.valor).label("total"))
+            .filter(Transaction.user_id == usuario_id, Transaction.tipo == "despesa")
+            .group_by(Transaction.categoria)
+            .order_by(func.sum(Transaction.valor).desc())
+            .all()
+        )
+        por_categoria = [{"categoria": c[0], "total": float(c[1])} for c in cats]
+
+        total_entradas = float(receitas_var) + float(rendas_fixas)
+        total_saidas = float(despesas_var) + float(gastos_fixos)
+
+        return {
+            "total_receitas": total_entradas,
+            "total_despesas": total_saidas,
+            "receitas_variaveis": float(receitas_var),
+            "despesas_variaveis": float(despesas_var),
+            "rendas_fixas": float(rendas_fixas),
+            "gastos_fixos": float(gastos_fixos),
+            "saldo": total_entradas - total_saidas,
+            "total_lancamentos": int(total_lancamentos),
+            "despesas_por_categoria": por_categoria
+        }
+    finally:
+        db.close()
+
+
+def obter_dados_graficos_dashboard(usuario_id: int) -> dict:
+    resumo = obter_resumo_financeiro(usuario_id)
+    return {
+        "cards": {
+            "entradas": resumo["total_receitas"],
+            "saidas": resumo["total_despesas"],
+            "saldo": resumo["saldo"],
+            "lancamentos": resumo["total_lancamentos"]
+        },
+        "pizza_categorias": resumo["despesas_por_categoria"],
+        "colunas_comparativo": {
+            "labels": ["Mês Vigente"],
+            "entradas": [resumo["total_receitas"]],
+            "saidas": [resumo["total_despesas"]]
+        }
+    }

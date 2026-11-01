@@ -23,14 +23,14 @@ from core.database import (
     autenticar_usuario,
     obter_usuario_por_id,
     atualizar_configuracoes_usuario,
-    criar_renda_fixa,
+    adicionar_renda_fixa,
     listar_rendas_fixas,
     atualizar_renda_fixa,
-    deletar_renda_fixa,
-    criar_gasto_fixo,
+    remover_renda_fixa,
+    adicionar_gasto_fixo,
     listar_gastos_fixos,
     atualizar_gasto_fixo,
-    deletar_gasto_fixo,
+    remover_gasto_fixo,
     gerar_token_mobile,
     validar_e_consumir_token_mobile,
     salvar_mensagem_historico,
@@ -80,30 +80,148 @@ def obter_ip_rede_local() -> str:
         s.close()
     return ip
 
+# Caminho: main.py
+
+def registrar_sessao_usuario(usuario: dict):
+    """Grava todas as chaves de sessão esperadas pelo sistema para evitar redirecionamento para o login."""
+    session.clear()
+    session.permanent = True
+    uid = usuario.get("id")
+    nome = usuario.get("nome", "Usuário")
+    email = usuario.get("email", "")
+
+    session["user_id"] = uid
+    session["usuario_id"] = uid
+    session["user_nome"] = nome
+    session["usuario_nome"] = nome
+    session["user_email"] = email
+    session["usuario_email"] = email
+    session.modified = True
+
 
 def login_obrigatorio(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if "user_id" not in session:
+        uid = session.get("user_id") or session.get("usuario_id")
+        if not uid:
             return jsonify({"sucesso": False, "erro": "Sessão expirada. Faça login novamente."}), 401
+        session["user_id"] = uid
         return f(*args, **kwargs)
     return decorated_function
 
 
-# ==================== ROTAS DE PÁGINAS WEB ====================
-
 @app.route("/")
 def index():
-    if "user_id" in session:
+    # Se for link de redefinição de senha vindo do e-mail (?reset_token=...), abre a tela mesmo logado
+    if request.args.get("reset_token"):
+        return send_from_directory(WEB_DIR, "index.html")
+    if session.get("user_id") or session.get("usuario_id"):
         return redirect("/pages/dashboard.html")
     return send_from_directory(WEB_DIR, "index.html")
 
 
 @app.route("/pages/<path:filename>")
 def serve_pages(filename):
-    if "user_id" not in session:
+    uid = session.get("user_id") or session.get("usuario_id")
+    if not uid:
         return redirect("/")
+    session["user_id"] = uid
     return send_from_directory(os.path.join(WEB_DIR, "pages"), filename)
+
+
+# ==================== ROTAS DE AUTENTICAÇÃO, 2FA E RECUPERAÇÃO DE SENHA ====================
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_login():
+    dados = request.get_json(silent=True) or {}
+    identificador = (dados.get("identificador") or dados.get("email") or "").strip()
+    senha = dados.get("senha") or ""
+
+    resultado = iniciar_login_hibrido(identificador, senha)
+    if not resultado.get("sucesso"):
+        return jsonify(resultado), 401
+
+    if resultado.get("requer_2fa"):
+        email_destino = resultado.get("email_destino") or resultado.get("email") or identificador
+        nome_usuario = resultado.get("nome") or "Usuário"
+        codigo_2fa = resultado.get("codigo_gerado") or "000000"
+
+        envio = enviar_email_codigo_2fa(
+            destinatario=email_destino,
+            nome=nome_usuario,
+            codigo=codigo_2fa
+        )
+        return jsonify({
+            "sucesso": True,
+            "requer_2fa": True,
+            "identificador": resultado.get("identificador") or email_destino,
+            "email_mascarado": resultado.get("email_mascarado") or email_destino,
+            "aviso_smtp": envio.get("aviso")
+        }), 200
+
+    usuario = resultado.get("usuario") or {}
+    registrar_sessao_usuario(usuario)
+    return jsonify({"sucesso": True, "usuario": usuario, "redirect": "/pages/dashboard.html"}), 200
+
+
+@app.route("/api/auth/verificar-2fa", methods=["POST"])
+def api_verificar_2fa():
+    dados = request.get_json(silent=True) or {}
+    identificador = (dados.get("identificador") or "").strip()
+    codigo = (dados.get("codigo") or "").strip()
+
+    resultado = validar_codigo_2fa_banco(identificador, codigo)
+    if not resultado.get("sucesso"):
+        return jsonify(resultado), 400
+
+    usuario = resultado.get("usuario") or {}
+    registrar_sessao_usuario(usuario)
+
+    return jsonify({
+        "sucesso": True,
+        "usuario": usuario,
+        "redirect": "/pages/dashboard.html"
+    }), 200
+
+
+@app.route("/api/auth/recuperar-senha", methods=["POST"])
+def api_recuperar_senha():
+    dados = request.get_json(silent=True) or {}
+    email = (dados.get("email") or dados.get("identificador") or "").strip()
+
+    if not email:
+        return jsonify({"sucesso": False, "erro": "Informe o e-mail cadastrado."}), 400
+
+    res = gerar_token_recuperacao_senha(email)
+    if not res.get("sucesso"):
+        return jsonify(res), 404
+
+    email_destino = res.get("email_destino") or res.get("email") or email
+    nome_usuario = res.get("nome") or "Usuário"
+    base_url = request.host_url.rstrip("/")
+    link_redefinicao = f"{base_url}/?reset_token={res['token']}"
+
+    envio = enviar_email_recuperacao_senha(
+        destinatario=email_destino,
+        nome=nome_usuario,
+        link_redefinicao=link_redefinicao
+    )
+
+    return jsonify({
+        "sucesso": True,
+        "mensagem": f"Link de alteração de senha enviado para {email_destino}!",
+        "aviso_smtp": envio.get("aviso")
+    }), 200
+
+
+@app.route("/api/auth/redefinir-senha", methods=["POST"])
+def api_redefinir_senha():
+    dados = request.get_json(silent=True) or {}
+    token = (dados.get("token") or "").strip()
+    nova_senha = dados.get("nova_senha") or ""
+
+    res = redefinir_senha_com_token(token, nova_senha)
+    return jsonify(res), (200 if res.get("sucesso") else 400)
 
 
 # ==================== ROTAS DE AUTENTICAÇÃO (SEM TELEFONE) ====================
@@ -111,32 +229,39 @@ def serve_pages(filename):
 @app.route("/api/auth/register", methods=["POST"])
 def api_register():
     dados = request.get_json(silent=True) or {}
-    nome = dados.get("nome", "")
-    email = dados.get("email", "")
-    senha = dados.get("senha", "")
-    telegram_username = dados.get("telegram_username") or None
+    nome = (dados.get("nome") or "").strip()
+    email = (dados.get("email") or "").strip()
+    telegram = (
+        dados.get("telegram_username")
+        or dados.get("telegram")
+        or dados.get("arroba_telegram")
+        or ""
+    ).strip()
+    telegram_id = (
+        dados.get("telegram_id")
+        or dados.get("telegram_chat_id")
+        or dados.get("chat_id")
+        or ""
+    ).strip()
+    senha = dados.get("senha") or ""
 
     if not nome or not email or len(senha) < 6:
-        return jsonify({"sucesso": False, "erro": "Preencha nome, e-mail e senha (mín. 6 caracteres)."}), 400
+        return jsonify({
+            "sucesso": False,
+            "erro": "Preencha nome, e-mail, @Telegram e senha (mín. 6 caracteres)."
+        }), 400
 
-    resultado = criar_usuario(nome, email, senha, telegram_username)
-    return jsonify(resultado), (201 if resultado["sucesso"] else 400)
+    resultado = criar_usuario_com_telegram_obrigatorio(
+        nome=nome,
+        email=email,
+        senha_plana=senha,
+        telegram=telegram,
+        telegram_id=telegram_id
+    )
+    status_code = 201 if resultado.get("sucesso") else 400
+    return jsonify(resultado), status_code
 
 
-# @app.route("/api/auth/login", methods=["POST"])
-# def api_login():
-#     dados = request.get_json(silent=True) or {}
-#     email = dados.get("email", "")
-#     senha = dados.get("senha", "")
-
-#     resultado = autenticar_usuario(email, senha)
-#     if resultado["sucesso"]:
-#         session.clear()
-#         session["user_id"] = resultado["usuario"]["id"]
-#         session["user_nome"] = resultado["usuario"]["nome"]
-#         session["user_email"] = resultado["usuario"]["email"]
-#         return jsonify(resultado), 200
-#     return jsonify(resultado), 401
 
 
 @app.route("/api/auth/logout", methods=["POST", "GET"])
@@ -194,7 +319,7 @@ def api_rendas_fixas():
         return jsonify({"sucesso": True, "rendas_fixas": itens, "resumo": resumo}), 200
 
     dados = request.get_json(silent=True) or {}
-    res = criar_renda_fixa(
+    res = adicionar_renda_fixa(
         usuario_id=user_id,
         description=dados.get("description", ""),
         amount=float(dados.get("amount", 0)),
@@ -209,7 +334,7 @@ def api_rendas_fixas():
 def api_renda_fixa_detalhe(renda_id):
     user_id = session["user_id"]
     if request.method == "DELETE":
-        res = deletar_renda_fixa(user_id, renda_id)
+        res = remover_renda_fixa(user_id, renda_id)
         return jsonify(res), (200 if res["sucesso"] else 404)
 
     dados = request.get_json(silent=True) or {}
@@ -236,7 +361,7 @@ def api_gastos_fixos():
         return jsonify({"sucesso": True, "gastos_fixos": itens, "resumo": resumo}), 200
 
     dados = request.get_json(silent=True) or {}
-    res = criar_gasto_fixo(
+    res = adicionar_gasto_fixo(
         usuario_id=user_id,
         description=dados.get("description", ""),
         amount=float(dados.get("amount", 0)),
@@ -251,7 +376,7 @@ def api_gastos_fixos():
 def api_gasto_fixo_detalhe(gasto_id):
     user_id = session["user_id"]
     if request.method == "DELETE":
-        res = deletar_gasto_fixo(user_id, gasto_id)
+        res = remover_gasto_fixo(user_id, gasto_id)
         return jsonify(res), (200 if res["sucesso"] else 404)
 
     dados = request.get_json(silent=True) or {}
@@ -483,57 +608,6 @@ def webhook_telegram():
 #     return jsonify(resultado), status_code
 
 
-@app.route("/api/auth/login", methods=["POST"])
-def api_login():
-    dados = request.get_json(silent=True) or {}
-    identificador = dados.get("identificador") or dados.get("email") or ""
-    senha = dados.get("senha") or ""
-
-    resultado = iniciar_login_hibrido(identificador, senha)
-    if not resultado.get("sucesso"):
-        return jsonify(resultado), 401
-
-    # Se for o 1º login, envia o código de 6 dígitos (2FA) por e-mail
-    if resultado.get("requer_2fa"):
-        envio = enviar_email_codigo_2fa(
-            destinatario=resultado["email_destino"],
-            nome=resultado["nome"],
-            codigo=resultado["codigo_gerado"]
-        )
-        return jsonify({
-            "sucesso": True,
-            "requer_2fa": True,
-            "identificador": resultado["identificador"],
-            "email_mascarado": resultado["email_mascarado"],
-            "aviso_smtp": envio.get("aviso")
-        }), 200
-
-    # Login normal (após 1º acesso já verificado) usando as chaves de sessão do sistema
-    usuario = resultado["usuario"]
-    session.clear()
-    session["user_id"] = usuario["id"]
-    session["user_nome"] = usuario["nome"]
-    session["user_email"] = usuario["email"]
-    return jsonify({"sucesso": True, "usuario": usuario}), 200
-
-
-@app.route("/api/auth/verificar-2fa", methods=["POST"])
-def api_verificar_2fa():
-    dados = request.get_json(silent=True) or {}
-    identificador = dados.get("identificador", "")
-    codigo = dados.get("codigo", "")
-
-    resultado = validar_codigo_2fa_banco(identificador, codigo)
-    if not resultado.get("sucesso"):
-        return jsonify(resultado), 400
-
-    usuario = resultado["usuario"]
-    session.clear()
-    session["user_id"] = usuario["id"]
-    session["user_nome"] = usuario["nome"]
-    session["user_email"] = usuario["email"]
-    return jsonify({"sucesso": True, "usuario": usuario}), 200
-
 
 @app.route("/api/auth/reenviar-2fa", methods=["POST"])
 def api_reenviar_2fa():
@@ -560,41 +634,6 @@ def api_reenviar_2fa():
         return jsonify({"sucesso": True, "aviso_smtp": envio.get("aviso")}), 200
     finally:
         db.close()
-
-
-@app.route("/api/auth/recuperar-senha", methods=["POST"])
-def api_recuperar_senha():
-    dados = request.get_json(silent=True) or {}
-    email = dados.get("email", "")
-
-    res = gerar_token_recuperacao_senha(email)
-    if not res.get("sucesso"):
-        return jsonify(res), 404
-
-    base_url = request.host_url.rstrip("/")
-    link_redefinicao = f"{base_url}/?reset_token={res['token']}"
-
-    envio = enviar_email_recuperacao_senha(
-        destinatario=res["email"],
-        nome=res["nome"],
-        link_redefinicao=link_redefinicao
-    )
-
-    return jsonify({
-        "sucesso": True,
-        "mensagem": f"Link de alteração de senha enviado para {res['email']}!",
-        "aviso_smtp": envio.get("aviso")
-    }), 200
-
-
-@app.route("/api/auth/redefinir-senha", methods=["POST"])
-def api_redefinir_senha():
-    dados = request.get_json(silent=True) or {}
-    token = dados.get("token", "")
-    nova_senha = dados.get("nova_senha", "")
-
-    res = redefinir_senha_com_token(token, nova_senha)
-    return jsonify(res), (200 if res.get("sucesso") else 400)
 
 
 if __name__ == "__main__":

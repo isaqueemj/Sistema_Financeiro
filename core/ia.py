@@ -18,8 +18,8 @@ except Exception:
 
 from core.database import (
     registrar_transacao,
-    criar_renda_fixa,
-    criar_gasto_fixo,
+    adicionar_renda_fixa,
+    adicionar_gasto_fixo,
     listar_rendas_fixas,
     listar_gastos_fixos,
     obter_resumo_financeiro,
@@ -381,7 +381,7 @@ def _executar_acao_estruturada(usuario_id: int, texto_original: str, dados: dict
     # 1. Cadastro de Gasto Fixo via Chat
     if intencao == "cadastrar_gasto_fixo" and valor and float(valor) > 0:
         dia_venc = int(dia_mes) if (dia_mes and 1 <= int(dia_mes) <= 31) else 10
-        res_db = criar_gasto_fixo(
+        res_db = adicionar_gasto_fixo(
             usuario_id=usuario_id,
             description=descricao,
             amount=float(valor),
@@ -410,7 +410,7 @@ def _executar_acao_estruturada(usuario_id: int, texto_original: str, dados: dict
     # 2. Cadastro de Renda Fixa via Chat
     elif intencao == "cadastrar_renda_fixa" and valor and float(valor) > 0:
         dia_rec = int(dia_mes) if (dia_mes and 1 <= int(dia_mes) <= 31) else 5
-        res_db = criar_renda_fixa(
+        res_db = adicionar_renda_fixa(
             usuario_id=usuario_id,
             description=descricao,
             amount=float(valor),

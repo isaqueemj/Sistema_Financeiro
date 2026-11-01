@@ -1,224 +1,265 @@
 // Caminho: web/js/auth.js
-
-let estadoAtual = "login";
 let identificadorPendente2FA = "";
-let tokenResetUrl = null;
 
 document.addEventListener("DOMContentLoaded", () => {
     configurarBotoesOlhoSenha();
-    configurarAlternanciaSplitScreen();
-    configurarInputsOTP2FA();
+    configurarAlternanciaTelas();
     configurarFormularioLogin();
-    configurarFormulario2FA();
     configurarFormularioCadastro();
-    configurarFormularioEsqueciSenha();
-    configurarFormularioRedefinirSenha();
-
-    // Verifica se o usuário abriu o link de redefinição de senha vindo do e-mail (?reset_token=...)
-    const params = new URLSearchParams(window.location.search);
-    if (params.has("reset_token")) {
-        tokenResetUrl = params.get("reset_token");
-        mostrarVisao("reset-password");
-    }
+    configurarEventos2FA();
 });
 
-function configurarBotoesOlhoSenha() {
-    document.querySelectorAll(".btn-toggle-password").forEach((botao) => {
-        botao.addEventListener("click", () => {
-            const targetId = botao.getAttribute("data-target");
-            const inputSenha = document.getElementById(targetId);
-            const icone = botao.querySelector("i");
-            if (!inputSenha) return;
+function exibirAlerta(mensagem, tipo = "erro") {
+    const seletores = [
+        "#auth-alert",
+        "#login-alert",
+        ".alert-box",
+        ".erro-banner",
+        "[role='alert']"
+    ];
+    let caixa = null;
+    for (const sel of seletores) {
+        const el = document.querySelector(sel);
+        if (el) {
+            caixa = el;
+            break;
+        }
+    }
 
-            if (inputSenha.type === "password") {
-                inputSenha.type = "text";
-                icone.classList.replace("bi-eye", "bi-eye-slash");
-            } else {
-                inputSenha.type = "password";
-                icone.classList.replace("bi-eye-slash", "bi-eye");
-            }
+    if (!caixa) {
+        // Procura pela div vermelha existente ou cria uma acima do título
+        const formLogin = document.querySelector("form");
+        caixa = document.createElement("div");
+        caixa.id = "auth-alert";
+        caixa.style.padding = "12px 16px";
+        caixa.style.borderRadius = "8px";
+        caixa.style.marginBottom = "16px";
+        caixa.style.fontSize = "14px";
+        if (formLogin && formLogin.parentElement) {
+            formLogin.parentElement.insertBefore(caixa, formLogin);
+        }
+    }
+
+    caixa.style.display = "block";
+    if (tipo === "sucesso") {
+        caixa.style.backgroundColor = "rgba(16, 185, 129, 0.15)";
+        caixa.style.border = "1px solid rgba(16, 185, 129, 0.45)";
+        caixa.style.color = "#6ee7b7";
+    } else {
+        caixa.style.backgroundColor = "rgba(239, 68, 68, 0.15)";
+        caixa.style.border = "1px solid rgba(239, 68, 68, 0.45)";
+        caixa.style.color = "#fca5a5";
+    }
+    caixa.textContent = mensagem;
+}
+
+function limparAlerta() {
+    const caixa = document.querySelector("#auth-alert, #login-alert, .alert-box");
+    if (caixa) caixa.style.display = "none";
+}
+
+function configurarBotoesOlhoSenha() {
+    document.querySelectorAll(".toggle-password, [data-toggle-password]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const input = btn.parentElement.querySelector("input");
+            if (!input) return;
+            input.type = input.type === "password" ? "text" : "password";
         });
     });
 }
 
-function configurarAlternanciaSplitScreen() {
-    const btnAlternar = document.getElementById("btn-alternar-modo");
-    const btnVoltarLogin = document.getElementById("btn-voltar-login");
+function configurarAlternanciaTelas() {
+    const btnCriarConta = document.getElementById("btn-show-register") ||
+        Array.from(document.querySelectorAll("button, a")).find(
+            (el) => el.textContent.trim().toUpperCase() === "CRIAR CONTA"
+        );
 
-    if (btnAlternar) {
-        btnAlternar.addEventListener("click", () => {
-            if (estadoAtual === "login" || estadoAtual === "2fa" || estadoAtual === "reset-password") {
-                mostrarVisao("register");
-            } else {
-                mostrarVisao("login");
-            }
+    const btnVoltarLogin = document.getElementById("btn-show-login") ||
+        Array.from(document.querySelectorAll("button, a")).find(
+            (el) => el.textContent.trim().toUpperCase().includes("JÁ TENHO CONTA") ||
+                    el.textContent.trim().toUpperCase().includes("FAZER LOGIN")
+        );
+
+    const viewLogin = document.getElementById("login-view") || document.getElementById("form-login");
+    const viewRegister = document.getElementById("register-view") || document.getElementById("form-register");
+
+    if (btnCriarConta && viewLogin && viewRegister) {
+        btnCriarConta.addEventListener("click", (e) => {
+            e.preventDefault();
+            limparAlerta();
+            viewLogin.style.display = "none";
+            viewRegister.style.display = "block";
         });
     }
 
-    if (btnVoltarLogin) {
-        btnVoltarLogin.addEventListener("click", () => mostrarVisao("login"));
+    if (btnVoltarLogin && viewLogin && viewRegister) {
+        btnVoltarLogin.addEventListener("click", (e) => {
+            e.preventDefault();
+            limparAlerta();
+            viewRegister.style.display = "none";
+            viewLogin.style.display = "block";
+        });
     }
 }
 
-function mostrarVisao(novaVisao) {
-    estadoAtual = novaVisao;
-    ocultarAlerta("auth-alert");
-
-    const views = {
-        "login": document.getElementById("view-login"),
-        "2fa": document.getElementById("view-2fa"),
-        "register": document.getElementById("view-register"),
-        "reset-password": document.getElementById("view-reset-password")
-    };
-
-    Object.values(views).forEach((v) => v && v.classList.remove("active"));
-    if (views[novaVisao]) views[novaVisao].classList.add("active");
-
-    const ctaTitulo = document.getElementById("cta-titulo");
-    const ctaDescricao = document.getElementById("cta-descricao");
-    const btnAlternar = document.getElementById("btn-alternar-modo");
-
-    if (novaVisao === "register") {
-        ctaTitulo.textContent = "Já possui conta?";
-        ctaDescricao.textContent = "Acesse agora usando seu e-mail ou seu @Telegram vinculado.";
-        btnAlternar.textContent = "FAZER LOGIN";
-    } else {
-        ctaTitulo.textContent = "Novo por aqui?";
-        ctaDescricao.textContent = "Cadastre-se vinculando seu @Telegram obrigatório e registre gastos por linguagem natural com gráficos em tempo real.";
-        btnAlternar.textContent = "CRIAR CONTA";
-    }
-
-    if (novaVisao === "2fa") {
-        const primeiroInput = document.querySelector(".otp-input");
-        if (primeiroInput) primeiroInput.focus();
-    }
-}
-
-function validarIdentificadorHibrido(valor) {
-    const limpo = valor.trim();
-    const regexEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const regexTelegram = /^@[a-zA-Z0-9_]{3,32}$/;
-
-    if (regexEmail.test(limpo)) {
-        return { valido: true, tipo: "email", valorNormalizado: limpo.toLowerCase() };
-    }
-    if (regexTelegram.test(limpo)) {
-        return { valido: true, tipo: "telegram", valorNormalizado: limpo };
-    }
-    // Se digitou o username sem @ e sem ponto, adiciona @ automaticamente
-    if (/^[a-zA-Z0-9_]{3,32}$/.test(limpo)) {
-        return { valido: true, tipo: "telegram", valorNormalizado: "@" + limpo };
-    }
-    return { valido: false, tipo: null, valorNormalizado: limpo };
-}
-
-/* ==========================================================
-   LOGIN E TRANSIÇÃO PARA 2FA REAL
-========================================================== */
 function configurarFormularioLogin() {
-    const formLogin = document.getElementById("form-login");
+    const formLogin = document.getElementById("form-login") || document.querySelector("form");
     if (!formLogin) return;
 
     formLogin.addEventListener("submit", async (e) => {
         e.preventDefault();
-        ocultarAlerta("auth-alert");
+        limparAlerta();
 
-        const inputIdent = document.getElementById("login-identificador");
-        const inputSenha = document.getElementById("login-senha");
-        const btnEntrar = document.getElementById("btn-entrar");
+        const inputIdent =
+            document.getElementById("login-identificador") ||
+            document.getElementById("login-email") ||
+            formLogin.querySelector("input[type='text'], input[type='email']");
+        const inputSenha =
+            document.getElementById("login-senha") ||
+            formLogin.querySelector("input[type='password']");
 
-        const validacao = validarIdentificadorHibrido(inputIdent.value);
-        if (!validacao.valido) {
-            exibirAlerta("auth-alert", "Informe um E-mail válido ou seu @usuário do Telegram (ex: @meu_usuario).", "error");
-            inputIdent.focus();
+        const identificador = inputIdent ? inputIdent.value.trim() : "";
+        const senha = inputSenha ? inputSenha.value : "";
+
+        if (!identificador || !senha) {
+            exibirAlerta("Preencha seu E-mail/@Telegram e sua senha.");
             return;
         }
 
-        if (!inputSenha.value) {
-            exibirAlerta("auth-alert", "Por favor, insira sua senha.", "error");
-            inputSenha.focus();
-            return;
-        }
-
-        btnEntrar.disabled = true;
-        btnEntrar.innerHTML = `<span>Autenticando...</span>`;
-
+        let res;
+        let data;
         try {
-            const response = await fetch("/api/auth/login", {
+            res = await fetch("/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    identificador: validacao.valorNormalizado,
-                    email: validacao.valorNormalizado,
-                    senha: inputSenha.value
-                })
+                body: JSON.stringify({ identificador, email: identificador, senha })
             });
-
-            const data = await response.json();
-
-            if (response.ok && data.requer_2fa) {
-                identificadorPendente2FA = data.identificador || validacao.valorNormalizado;
-                document.getElementById("twofa-email-destino").textContent = data.email_mascarado || validacao.valorNormalizado;
-                document.querySelectorAll(".otp-input").forEach((inp) => (inp.value = ""));
-                mostrarVisao("2fa");
-
-                const msgExtra = data.aviso_smtp ? ` (${data.aviso_smtp})` : "";
-                exibirAlerta("auth-alert", `Código de 6 dígitos enviado para ${data.email_mascarado}!${msgExtra}`, "success");
-                return;
-            }
-
-            if (response.ok && data.sucesso) {
-                localStorage.setItem("usuario_logado", JSON.stringify(data.usuario || {}));
-                window.location.href = "/pages/dashboard.html";
-            } else {
-                exibirAlerta("auth-alert", data.erro || "Credenciais inválidas.", "error");
-            }
-        } catch (err) {
-            exibirAlerta("auth-alert", "Erro de conexão com o servidor Flask.", "error");
-        } finally {
-            btnEntrar.disabled = false;
-            btnEntrar.innerHTML = `<span>ENTRAR</span><i class="bi bi-arrow-right-short fs-5"></i>`;
+            data = await res.json();
+        } catch (networkErr) {
+            console.error("Erro na requisição /api/auth/login:", networkErr);
+            exibirAlerta("Erro de comunicação com o servidor Flask. Verifique se o backend está ativo.");
+            return;
         }
+
+        if (!res.ok || !data.sucesso) {
+            exibirAlerta(data.erro || "Credenciais inválidas.");
+            return;
+        }
+
+        if (data.requer_2fa) {
+            identificadorPendente2FA = data.identificador || identificador;
+            abrirTelaVerificacao2FA(data.email_mascarado || identificador, data.aviso_smtp);
+            return;
+        }
+
+        if (data.usuario) {
+            localStorage.setItem("usuario_logado", JSON.stringify(data.usuario));
+        }
+        window.location.href = "/pages/dashboard.html";
     });
 }
 
-/* ==========================================================
-   INPUTS E VALIDAÇÃO DO CÓDIGO 2FA
-========================================================== */
-function configurarInputsOTP2FA() {
-    const inputs = document.querySelectorAll(".otp-input");
+function abrirTelaVerificacao2FA(emailMascarado, avisoSmtp) {
+    let container2FA = document.getElementById("view-2fa") || document.getElementById("step-2fa");
+    const formLogin = document.getElementById("form-login") || document.querySelector("form");
 
-    inputs.forEach((input, index) => {
-        input.addEventListener("input", (e) => {
-            e.target.value = e.target.value.replace(/[^0-9]/g, "");
-            if (e.target.value && index < inputs.length - 1) {
-                inputs[index + 1].focus();
-            }
-        });
+    if (formLogin) {
+        formLogin.style.display = "none";
+    }
 
-        input.addEventListener("keydown", (e) => {
-            if (e.key === "Backspace" && !e.target.value && index > 0) {
-                inputs[index - 1].focus();
-            }
-        });
+    // Se o HTML não tiver o container 2FA pronto, cria dinamicamente sem quebrar
+    if (!container2FA) {
+        container2FA = document.createElement("div");
+        container2FA.id = "view-2fa";
+        container2FA.style.marginTop = "16px";
+        container2FA.innerHTML = `
+            <h3 style="color:#f8fafc; font-size:20px; margin-bottom:8px;">Confirme seu 1º acesso (2FA)</h3>
+            <p id="texto-email-2fa" style="color:#94a3b8; font-size:14px; margin-bottom:16px;"></p>
+            <input id="input-codigo-2fa" type="text" maxlength="6" placeholder="Digite os 6 dígitos"
+                style="width:100%; padding:12px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#fff; font-size:20px; letter-spacing:8px; text-align:center; margin-bottom:14px;" />
+            <button id="btn-confirmar-2fa" type="button"
+                style="width:100%; padding:12px; border-radius:8px; border:none; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; margin-bottom:10px;">
+                VALIDAR CÓDIGO 2FA →
+            </button>
+            <button id="btn-reenviar-2fa" type="button"
+                style="width:100%; padding:10px; border-radius:8px; border:1px solid #334155; background:transparent; color:#93c5fd; cursor:pointer;">
+                Reenviar código por e-mail
+            </button>
+        `;
+        if (formLogin && formLogin.parentElement) {
+            formLogin.parentElement.appendChild(container2FA);
+        } else {
+            document.body.appendChild(container2FA);
+        }
+        configurarEventos2FA();
+    }
 
-        input.addEventListener("paste", (e) => {
+    container2FA.style.display = "block";
+    const infoEmail = document.getElementById("texto-email-2fa") || document.getElementById("email-mascarado-2fa");
+    if (infoEmail) {
+        infoEmail.textContent = `Enviamos um código de 6 dígitos para ${emailMascarado}. (Confira também o terminal do VS Code caso o SMTP não esteja configurado).`;
+    }
+
+    if (avisoSmtp) {
+        exibirAlerta(avisoSmtp, "sucesso");
+    } else {
+        exibirAlerta(`Código 2FA enviado para ${emailMascarado}!`, "sucesso");
+    }
+}
+
+function configurarEventos2FA() {
+    const btnConfirmar = document.getElementById("btn-confirmar-2fa") || document.getElementById("btn-verify-2fa");
+    if (btnConfirmar && !btnConfirmar.dataset.bound) {
+        btnConfirmar.dataset.bound = "1";
+        btnConfirmar.addEventListener("click", async (e) => {
             e.preventDefault();
-            const colado = (e.clipboardData || window.clipboardData).getData("text").replace(/[^0-9]/g, "").slice(0, 6);
-            colado.split("").forEach((char, i) => {
-                if (inputs[i]) inputs[i].value = char;
-            });
-            const foco = Math.min(colado.length, inputs.length - 1);
-            if (inputs[foco]) inputs[foco].focus();
+            let codigo = "";
+            const inputUnico = document.getElementById("input-codigo-2fa");
+            if (inputUnico) {
+                codigo = inputUnico.value.trim();
+            } else {
+                document.querySelectorAll(".otp-input, .digito-2fa").forEach((inp) => {
+                    codigo += inp.value.trim();
+                });
+            }
+
+            if (codigo.length < 6) {
+                exibirAlerta("Digite o código completo de 6 dígitos.");
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/auth/verificar-2fa", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        identificador: identificadorPendente2FA,
+                        codigo
+                    })
+                });
+                if (res.ok && data.sucesso) {
+                    localStorage.setItem("usuario_logado", JSON.stringify(data.usuario || {}));
+                    exibirAlerta("auth-alert", "2FA confirmado com sucesso! Redirecionando...", "success");
+                    
+                    // REDIRECIONAMENTO CORRETO PARA O DASHBOARD
+                    setTimeout(() => {
+                        window.location.href = "/pages/dashboard.html";
+                    }, 800);
+                } else {
+                    exibirAlerta("auth-alert", data.erro || "Código 2FA incorreto ou expirado.", "error");
+                }
+                window.location.href = "/pages/dashboard.html";
+            } catch (err) {
+                exibirAlerta("Erro ao validar o código 2FA no servidor.");
+            }
         });
-    });
+    }
 
     const btnReenviar = document.getElementById("btn-reenviar-2fa");
-    if (btnReenviar) {
+    if (btnReenviar && !btnReenviar.dataset.bound) {
+        btnReenviar.dataset.bound = "1";
         btnReenviar.addEventListener("click", async () => {
-            if (!identificadorPendente2FA) return;
-            btnReenviar.disabled = true;
-
             try {
                 const res = await fetch("/api/auth/reenviar-2fa", {
                     method: "POST",
@@ -227,208 +268,168 @@ function configurarInputsOTP2FA() {
                 });
                 const data = await res.json();
                 if (res.ok && data.sucesso) {
-                    const msgExtra = data.aviso_smtp ? ` (${data.aviso_smtp})` : "";
-                    exibirAlerta("auth-alert", `Novo código 2FA enviado!${msgExtra}`, "success");
+                    exibirAlerta("Novo código de 6 dígitos enviado! Confira seu e-mail ou terminal.", "sucesso");
                 } else {
-                    exibirAlerta("auth-alert", data.erro || "Erro ao reenviar código.", "error");
+                    exibirAlerta(data.erro || "Não foi possível reenviar o código.");
                 }
-            } catch (_) {
-                exibirAlerta("auth-alert", "Falha ao conectar ao servidor para reenviar código.", "error");
+            } catch (err) {
+                exibirAlerta("Falha ao solicitar novo código 2FA.");
             }
-
-            let seg = 30;
-            const timer = setInterval(() => {
-                seg--;
-                btnReenviar.textContent = `Reenviar em ${seg}s`;
-                if (seg <= 0) {
-                    clearInterval(timer);
-                    btnReenviar.disabled = false;
-                    btnReenviar.textContent = "Reenviar código por e-mail";
-                }
-            }, 1000);
         });
     }
 }
 
-function configurarFormulario2FA() {
-    const form2FA = document.getElementById("form-2fa");
-    if (!form2FA) return;
-
-    form2FA.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const codigo = Array.from(document.querySelectorAll(".otp-input")).map((i) => i.value).join("");
-
-        if (codigo.length < 6) {
-            exibirAlerta("auth-alert", "Digite os 6 dígitos do código enviado ao seu e-mail.", "error");
-            return;
-        }
-
-        const btnValidar = document.getElementById("btn-validar-2fa");
-        btnValidar.disabled = true;
-        btnValidar.innerHTML = `<span>Verificando...</span>`;
-
-        try {
-            const res = await fetch("/api/auth/verificar-2fa", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    identificador: identificadorPendente2FA,
-                    codigo: codigo
-                })
-            });
-
-            const data = await res.json();
-            if (res.ok && data.sucesso) {
-                localStorage.setItem("usuario_logado", JSON.stringify(data.usuario || {}));
-                exibirAlerta("auth-alert", "2FA confirmado com sucesso! Entrando...", "success");
-                setTimeout(() => {
-                    window.location.href = "/pages/dashboard.html";
-                }, 800);
-            } else {
-                exibirAlerta("auth-alert", data.erro || "Código 2FA incorreto ou expirado.", "error");
-            }
-        } catch (err) {
-            exibirAlerta("auth-alert", "Erro ao validar o código no servidor.", "error");
-        } finally {
-            btnValidar.disabled = false;
-            btnValidar.innerHTML = `<i class="bi bi-check2-circle"></i><span>VERIFICAR E ACESSAR</span>`;
-        }
-    });
-}
-
-/* ==========================================================
-   CADASTRO COM @TELEGRAM OBRIGATÓRIO
-========================================================== */
 function configurarFormularioCadastro() {
-    const formRegister = document.getElementById("form-register");
-    if (!formRegister) return;
+    const formReg = document.getElementById("form-register");
+    if (!formReg) return;
 
-    formRegister.addEventListener("submit", async (e) => {
+    formReg.addEventListener("submit", async (e) => {
         e.preventDefault();
-        ocultarAlerta("auth-alert");
+        limparAlerta();
 
-        const nome = document.getElementById("reg-nome").value.trim();
-        const email = document.getElementById("reg-email").value.trim();
-        let telegram = document.getElementById("reg-telegram").value.trim();
-        const senha = document.getElementById("reg-senha").value;
+        const nome = (document.getElementById("reg-nome")?.value || "").trim();
+        const email = (document.getElementById("reg-email")?.value || "").trim();
+        let telegram = (
+            document.getElementById("reg-telegram")?.value ||
+            document.getElementById("register-telegram")?.value ||
+            formReg.querySelector("input[name='telegram'], input[placeholder*='Telegram'], input[placeholder*='@']")?.value ||
+            ""
+        ).trim();
+        const telegram_id = (document.getElementById("reg-telegram-id")?.value || "").trim();
+        const senha = document.getElementById("reg-senha")?.value || "";
 
-        if (!nome || !email) {
-            exibirAlerta("auth-alert", "Nome e E-mail são obrigatórios.", "error");
-            return;
-        }
-
-        // Validação estrita do @Telegram obrigatório (RN03)
         if (!telegram) {
-            exibirAlerta("auth-alert", "O campo @Telegram é obrigatório para usar o sistema.", "error");
-            document.getElementById("reg-telegram").focus();
+            exibirAlerta("O @Telegram é obrigatório para criar sua conta (RN03).");
             return;
         }
-
         if (!telegram.startsWith("@")) {
             telegram = "@" + telegram;
         }
-
-        if (!/^@[a-zA-Z0-9_]{3,32}$/.test(telegram)) {
-            exibirAlerta("auth-alert", "Informe um @Telegram válido (ex: @seu_usuario, mínimo de 3 caracteres).", "error");
-            document.getElementById("reg-telegram").focus();
-            return;
-        }
-
-        if (!senha || senha.length < 6) {
-            exibirAlerta("auth-alert", "A senha deve ter no mínimo 6 caracteres.", "error");
-            return;
-        }
-
-        const btnCadastrar = document.getElementById("btn-cadastrar");
-        btnCadastrar.disabled = true;
-        btnCadastrar.innerHTML = `<span>Cadastrando...</span>`;
 
         try {
             const res = await fetch("/api/auth/register", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ nome, email, telegram, senha })
+                body: JSON.stringify({
+                    nome,
+                    email,
+                    telegram,
+                    telegram_username: telegram,
+                    telegram_id,
+                    senha
+                })
             });
-
             const data = await res.json();
-            if (res.ok && data.sucesso) {
-                mostrarVisao("login");
-                document.getElementById("login-identificador").value = email;
-                exibirAlerta(
-                    "auth-alert",
-                    "Conta criada com sucesso! Faça seu 1º login para receber o código 2FA no seu e-mail.",
-                    "success"
-                );
-                formRegister.reset();
-            } else {
-                exibirAlerta("auth-alert", data.erro || "Erro ao realizar cadastro.", "error");
+
+            if (!res.ok || !data.sucesso) {
+                exibirAlerta(data.erro || "Erro ao criar conta.");
+                return;
             }
+
+            exibirAlerta("Conta criada com sucesso! Faça login para receber seu código de 1º acesso (2FA).", "sucesso");
+            formReg.reset();
         } catch (err) {
-            exibirAlerta("auth-alert", "Erro de conexão com o servidor.", "error");
-        } finally {
-            btnCadastrar.disabled = false;
-            btnCadastrar.innerHTML = `<span>CADASTRAR COM SEGURANÇA</span>`;
+            exibirAlerta("Erro de comunicação ao tentar registrar usuário.");
         }
     });
 }
 
-/* ==========================================================
-   RECUPERAÇÃO E REDEFINIÇÃO DE SENHA POR E-MAIL
-========================================================== */
+// Adicione/atualize no seu web/js/auth.js:
+
+document.addEventListener("DOMContentLoaded", () => {
+    configurarFormularioEsqueciSenha();
+    configurarFormularioRedefinirSenha();
+
+    // Se o usuário clicou no link de recuperação recebido no e-mail (?reset_token=...)
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("reset_token")) {
+        window.tokenResetUrl = params.get("reset_token");
+        const viewLogin = document.getElementById("view-login");
+        const viewReset = document.getElementById("view-reset-password");
+        if (viewLogin && viewReset) {
+            viewLogin.classList.remove("active");
+            viewLogin.style.display = "none";
+            viewReset.classList.add("active");
+            viewReset.style.display = "block";
+        }
+    }
+});
+
 function configurarFormularioEsqueciSenha() {
     const formEsqueci = document.getElementById("form-esqueci-senha");
-    if (!formEsqueci) return;
+    if (!formEsqueci || formEsqueci.dataset.bound) return;
+    formEsqueci.dataset.bound = "1";
 
     formEsqueci.addEventListener("submit", async (e) => {
         e.preventDefault();
-        ocultarAlerta("forgot-alert");
-
         const inputEmail = document.getElementById("recuperar-email");
-        const email = inputEmail.value.trim();
+        const forgotAlert = document.getElementById("forgot-alert");
+        const btnEnviar = document.getElementById("btn-enviar-recuperacao");
+        const email = (inputEmail?.value || "").trim();
 
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            exibirAlerta("forgot-alert", "Digite um e-mail válido.", "error");
+        if (!email || !email.includes("@")) {
+            if (forgotAlert) {
+                forgotAlert.style.display = "block";
+                forgotAlert.className = "alert-box alert-error";
+                forgotAlert.textContent = "Digite um e-mail válido.";
+            }
             return;
         }
 
-        const btnEnviar = document.getElementById("btn-enviar-recuperacao");
-        btnEnviar.disabled = true;
-        btnEnviar.textContent = "Enviando...";
+        if (btnEnviar) {
+            btnEnviar.disabled = true;
+            btnEnviar.textContent = "Enviando...";
+        }
 
         try {
             const res = await fetch("/api/auth/recuperar-senha", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
                 body: JSON.stringify({ email })
             });
             const data = await res.json();
 
-            if (res.ok && data.sucesso) {
-                const msgExtra = data.aviso_smtp ? `\n(${data.aviso_smtp})` : "";
-                exibirAlerta("forgot-alert", `${data.mensagem}${msgExtra}`, "success");
-                formEsqueci.reset();
-            } else {
-                exibirAlerta("forgot-alert", data.erro || "Não foi possível enviar o e-mail de recuperação.", "error");
+            if (forgotAlert) {
+                forgotAlert.style.display = "block";
+                if (res.ok && data.sucesso) {
+                    forgotAlert.className = "alert-box alert-success";
+                    const extra = data.aviso_smtp ? ` (${data.aviso_smtp})` : "";
+                    forgotAlert.textContent = (data.mensagem || "Link enviado para seu e-mail!") + extra;
+                    formEsqueci.reset();
+                } else {
+                    forgotAlert.className = "alert-box alert-error";
+                    forgotAlert.textContent = data.erro || "Não foi possível enviar o link.";
+                }
             }
         } catch (err) {
-            exibirAlerta("forgot-alert", "Erro de comunicação com o servidor.", "error");
+            if (forgotAlert) {
+                forgotAlert.style.display = "block";
+                forgotAlert.className = "alert-box alert-error";
+                forgotAlert.textContent = "Erro de conexão com o servidor.";
+            }
         } finally {
-            btnEnviar.disabled = false;
-            btnEnviar.textContent = "Enviar Link";
+            if (btnEnviar) {
+                btnEnviar.disabled = false;
+                btnEnviar.textContent = "Enviar Link";
+            }
         }
     });
 }
 
 function configurarFormularioRedefinirSenha() {
     const formReset = document.getElementById("form-reset-password");
-    if (!formReset) return;
+    if (!formReset || formReset.dataset.bound) return;
+    formReset.dataset.bound = "1";
 
     formReset.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const novaSenha = document.getElementById("nova-senha-reset").value;
+        const novaSenha = document.getElementById("nova-senha-reset")?.value || "";
+        const params = new URLSearchParams(window.location.search);
+        const token = window.tokenResetUrl || params.get("reset_token") || "";
 
-        if (!novaSenha || novaSenha.length < 6) {
-            exibirAlerta("auth-alert", "A nova senha deve ter pelo menos 6 caracteres.", "error");
+        if (novaSenha.length < 6) {
+            alert("A nova senha deve ter pelo menos 6 caracteres.");
             return;
         }
 
@@ -436,32 +437,18 @@ function configurarFormularioRedefinirSenha() {
             const res = await fetch("/api/auth/redefinir-senha", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ token: tokenResetUrl, nova_senha: novaSenha })
+                credentials: "same-origin",
+                body: JSON.stringify({ token, nova_senha: novaSenha })
             });
             const data = await res.json();
-
             if (res.ok && data.sucesso) {
-                window.history.replaceState({}, document.title, "/");
-                mostrarVisao("login");
-                exibirAlerta("auth-alert", "Senha alterada com sucesso! Faça login com sua nova senha.", "success");
+                alert("Senha alterada com sucesso! Faça login com sua nova senha.");
+                window.location.href = "/";
             } else {
-                exibirAlerta("auth-alert", data.erro || "Link inválido ou expirado.", "error");
+                alert(data.erro || "Link inválido ou expirado.");
             }
         } catch (err) {
-            exibirAlerta("auth-alert", "Erro ao conectar ao servidor.", "error");
+            alert("Erro ao conectar ao servidor para salvar a nova senha.");
         }
     });
-}
-
-function exibirAlerta(elementId, mensagem, tipo) {
-    const box = document.getElementById(elementId);
-    if (!box) return;
-    box.className = `alert-box ${tipo === "success" ? "alert-success" : "alert-error"}`;
-    box.textContent = mensagem;
-    box.style.display = "block";
-}
-
-function ocultarAlerta(elementId) {
-    const box = document.getElementById(elementId);
-    if (box) box.style.display = "none";
 }
