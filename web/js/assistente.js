@@ -1,4 +1,27 @@
-// Caminho: web/js/assistente.js
+document.addEventListener("DOMContentLoaded", async () => {
+    const spanNome = document.getElementById("nome-usuario-topo"); // ajuste para o ID ou classe do seu HTML
+
+    // 1. Tenta carregar rápido do localStorage
+    const nomeSalvo = localStorage.getItem("nome_usuario");
+    if (spanNome && nomeSalvo) {
+        spanNome.textContent = nomeSalvo;
+    }
+
+    // 2. Confirma com a sessão do servidor Flask
+    try {
+        const resp = await fetch("/api/me");
+        if (resp.ok) {
+            const dados = await resp.json();
+            if (dados.nome && spanNome) {
+                spanNome.textContent = dados.nome;
+                localStorage.setItem("nome_usuario", dados.nome);
+            }
+        }
+    } catch (err) {
+        console.error("Erro ao carregar dados do usuário:", err);
+    }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
     carregarHistoricoConversa();
 

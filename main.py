@@ -145,22 +145,24 @@ def api_logout():
     if request.method == "GET":
         return redirect("/")
     return jsonify({"sucesso": True}), 200
+    
+
+@app.route("/dashboard") # ou a rota principal onde fica o Assistente
+def dashboard():
+    nome_logado = session.get("user_nome", "Usuário")
+    return render_template("index.html", nome_usuario=nome_logado)
 
 
-@app.route("/api/auth/me", methods=["GET"])
-@login_obrigatorio
+@app.route("/api/me", methods=["GET"])
 def api_me():
-    usuario = obter_usuario_por_id(session["user_id"])
-    if not usuario:
-        session.clear()
-        return jsonify({"sucesso": False, "erro": "Usuário não encontrado."}), 404
+    if "user_id" not in session:
+        return jsonify({"autenticado": False, "nome": "Usuário"}), 401
     return jsonify({
-        "sucesso": True,
-        "usuario": usuario,
-        "telegram_bot_username": obter_username_bot(),
-        "telegram_ativo": telegram_configurado()
-    }), 200
-
+        "autenticado": True,
+        "id": session.get("user_id"),
+        "nome": session.get("user_nome", "Usuário"),
+        "email": session.get("user_email")
+    })
 
 @app.route("/api/usuario/configuracoes", methods=["PUT"])
 @login_obrigatorio

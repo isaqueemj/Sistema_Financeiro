@@ -26,7 +26,7 @@
         <p class="subtitle">Tire dúvidas e peça análises sobre suas finanças</p>
       </div>
       <div class="topbar-actions">
-        <span class="user-greeting" id="dash-user-name">Olá, Usuário</span>
+        Olá, <span id="nome-usuario-topo">{{ nome_usuario | default('Usuário', true) }}</span>
       </div>
     </header>
 
