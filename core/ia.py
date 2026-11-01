@@ -54,7 +54,6 @@ CATEGORIAS_OFICIAIS = [
     "Saúde", "Educação", "Vestuário", "Outros"
 ]
 
-
 def _normalizar_texto(texto: str) -> str:
     mapa = str.maketrans(
         "áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ",
@@ -153,6 +152,7 @@ def gerar_grafico_financeiro_png(usuario_id: int, resumo: dict = None) -> str | 
     1. Colunas: Entradas vs. Saídas
     2. Rosca/Pizza: Gastos separados por Categoria/Tipo
     Retorna o caminho do arquivo salvo para envio pelo bot do Telegram.
+    Nao sei como mas esta funcionando certo
     """
     if plt is None:
         return None

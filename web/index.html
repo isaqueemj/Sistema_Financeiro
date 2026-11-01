@@ -96,12 +96,12 @@
                                         <p class="auth-subtitle">
                                             Enviamos um código de 6 dígitos para o e-mail 
                                             <strong id="twofa-email-destino" class="text-white">u***@email.com</strong>. 
-                                            Insira o código abaixo para liberar sua conta.
+                                            Insira ou cole o código abaixo para liberar sua conta.
                                         </p>
 
                                         <form id="form-2fa" novalidate>
                                             <div class="otp-inputs-container" aria-label="Código de verificação de 6 dígitos">
-                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 1">
+                                                <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required aria-label="Dígito 1">
                                                 <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 2">
                                                 <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 3">
                                                 <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 4">
@@ -109,7 +109,13 @@
                                                 <input type="text" class="otp-input" maxlength="1" inputmode="numeric" pattern="[0-9]*" required aria-label="Dígito 6">
                                             </div>
 
-                                            <button type="submit" id="btn-validar-2fa" class="btn-submit btn-submit-green mt-3">
+                                            <div class="d-flex justify-content-end mb-2">
+                                                <button type="button" id="btn-colar-2fa" class="btn-link-inline" style="font-size: 0.85rem;">
+                                                    <i class="bi bi-clipboard-check"></i> Colar código da área de transferência
+                                                </button>
+                                            </div>
+
+                                            <button type="submit" id="btn-validar-2fa" class="btn-submit btn-submit-green mt-2">
                                                 <i class="bi bi-check2-circle"></i>
                                                 <span>VERIFICAR E ACESSAR</span>
                                             </button>
@@ -187,16 +193,16 @@
                                         </form>
                                     </div>
 
-                                    <!-- VISÃO 4: REDEFINIR SENHA (ACIONADA PELO LINK DO E-MAIL) -->
+                                    <!-- VISÃO 4: REDEFINIR SENHA (COM CONFIRMAÇÃO DE SENHA) -->
                                     <div id="view-reset-password" class="auth-view">
                                         <h2 class="auth-title">Criar Nova Senha</h2>
                                         <p class="auth-subtitle">
-                                            Digite sua nova senha de acesso abaixo para concluir a recuperação.
+                                            Digite e confirme sua nova senha de acesso abaixo para concluir a alteração.
                                         </p>
 
                                         <form id="form-reset-password" novalidate>
                                             <div class="form-group">
-                                                <label for="nova-senha-reset">Nova Senha (mínimo 6 caracteres)</label>
+                                                <label for="nova-senha-reset">Nova Senha (mínimo 6 caracteres) *</label>
                                                 <div class="input-icon-wrapper">
                                                     <i class="bi bi-lock-fill input-icon-left"></i>
                                                     <input type="password" id="nova-senha-reset" required minlength="6" placeholder="••••••••">
@@ -205,6 +211,21 @@
                                                         class="btn-toggle-password" 
                                                         data-target="nova-senha-reset"
                                                         aria-label="Mostrar ou ocultar nova senha">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="confirmar-senha-reset">Confirmar Nova Senha *</label>
+                                                <div class="input-icon-wrapper">
+                                                    <i class="bi bi-shield-lock input-icon-left"></i>
+                                                    <input type="password" id="confirmar-senha-reset" required minlength="6" placeholder="Repita a nova senha">
+                                                    <button 
+                                                        type="button" 
+                                                        class="btn-toggle-password" 
+                                                        data-target="confirmar-senha-reset"
+                                                        aria-label="Mostrar ou ocultar confirmação de senha">
                                                         <i class="bi bi-eye"></i>
                                                     </button>
                                                 </div>
@@ -292,6 +313,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/js/auth.js"></script>
+    <script src="/js/auth.js?v=3"></script>
 </body>
 </html>

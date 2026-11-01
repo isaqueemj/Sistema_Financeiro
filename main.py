@@ -63,6 +63,7 @@ app = Flask(__name__, static_folder=WEB_DIR, static_url_path="")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "chave-secreta-tcc-financecontrol-2026")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = False
 
 # Inicializa tabelas no PostgreSQL (Supabase) ou SQLite e inicia o Bot do Telegram
 init_db()
@@ -83,7 +84,6 @@ def obter_ip_rede_local() -> str:
 # Caminho: main.py
 
 def registrar_sessao_usuario(usuario: dict):
-    """Grava todas as chaves de sessão esperadas pelo sistema para evitar redirecionamento para o login."""
     session.clear()
     session.permanent = True
     uid = usuario.get("id")
@@ -219,6 +219,10 @@ def api_redefinir_senha():
     dados = request.get_json(silent=True) or {}
     token = (dados.get("token") or "").strip()
     nova_senha = dados.get("nova_senha") or ""
+    confirmar_senha = dados.get("confirmar_senha")
+
+    if confirmar_senha is not None and nova_senha != confirmar_senha:
+        return jsonify({"sucesso": False, "erro": "A confirmação de senha não confere."}), 400
 
     res = redefinir_senha_com_token(token, nova_senha)
     return jsonify(res), (200 if res.get("sucesso") else 400)
@@ -484,12 +488,7 @@ def api_mobile_login():
 @app.route("/api/resumo", methods=["GET"])
 @login_obrigatorio
 def api_dashboard_stats():
-    """
-    Rota principal do Dashboard: retorna Cards de Valores (Entradas, Saídas, Saldo),
-    dados do Gráfico de Pizza (Categorias/Locais), dados do Gráfico de Colunas (Entradas vs Saídas)
-    e lista unificada de movimentações.
-    """
-    user_id = session["user_id"]
+    user_id = session.get("user_id") or session.get("usuario_id")
     periodo = request.args.get("periodo", "mes_atual")
 
     resumo = obter_resumo_financeiro(user_id, periodo=periodo)
@@ -505,13 +504,13 @@ def api_dashboard_stats():
             "email": session.get("user_email", "")
         },
         "resumo": resumo,
-        "grafico_pizza": resumo["grafico_pizza"],
-        "grafico_colunas": resumo["grafico_colunas"],
+        "grafico_pizza": resumo.get("grafico_pizza"),
+        "grafico_colunas": resumo.get("grafico_colunas"),
         "transacoes": transacoes,
         "rendas_fixas": rendas_fixas,
         "gastos_fixos": gastos_fixos
     }), 200
-
+    
 
 @app.route("/api/transacoes", methods=["GET", "POST"])
 @login_obrigatorio

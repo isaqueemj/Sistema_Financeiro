@@ -1075,7 +1075,9 @@ def remover_gasto_fixo(usuario_id: int, gasto_id: int) -> dict:
         db.close()
 
 
-def obter_resumo_financeiro(usuario_id: int) -> dict:
+# Caminho: core/database.py (Substitua apenas a função obter_resumo_financeiro)
+
+def obter_resumo_financeiro(usuario_id: int, periodo: str = "mes_atual") -> dict:
     db = SessionLocal()
     try:
         receitas_var = (
@@ -1116,20 +1118,37 @@ def obter_resumo_financeiro(usuario_id: int) -> dict:
         total_entradas = float(receitas_var) + float(rendas_fixas)
         total_saidas = float(despesas_var) + float(gastos_fixos)
 
+        labels_pizza = [c["categoria"] for c in por_categoria]
+        valores_pizza = [c["total"] for c in por_categoria]
+        if float(gastos_fixos) > 0:
+            labels_pizza.append("Gastos Fixos")
+            valores_pizza.append(float(gastos_fixos))
+
         return {
+            "mes_referencia": datetime.utcnow().strftime("%m/%Y"),
             "total_receitas": total_entradas,
             "total_despesas": total_saidas,
             "receitas_variaveis": float(receitas_var),
             "despesas_variaveis": float(despesas_var),
             "rendas_fixas": float(rendas_fixas),
+            "total_rendas_fixas": float(rendas_fixas),
             "gastos_fixos": float(gastos_fixos),
+            "total_gastos_fixos": float(gastos_fixos),
             "saldo": total_entradas - total_saidas,
             "total_lancamentos": int(total_lancamentos),
-            "despesas_por_categoria": por_categoria
+            "despesas_por_categoria": por_categoria,
+            "grafico_pizza": {
+                "labels": labels_pizza,
+                "valores": valores_pizza
+            },
+            "grafico_colunas": {
+                "labels": ["Mês Vigente"],
+                "entradas": [total_entradas],
+                "saidas": [total_saidas]
+            }
         }
     finally:
         db.close()
-
 
 def obter_dados_graficos_dashboard(usuario_id: int) -> dict:
     resumo = obter_resumo_financeiro(usuario_id)
