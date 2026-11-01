@@ -1,27 +1,20 @@
 // Caminho: web/js/rendas_fixas.js
-let listaRendasCache = [];
-
-function formatarBRL(valor) {
-    return Number(valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function exibirAlertaRenda(msg, tipo = "success") {
-    const box = document.getElementById("renda-alert");
-    if (!box) return;
-    box.style.display = "block";
-    box.className = `alert-box ${tipo === "success" ? "alert-success" : "alert-error"}`;
-    box.textContent = msg;
+function formatarMoedaBRL(valor) {
+    return Number(valor || 0).toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL"
+    });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     carregarRendasFixas();
 
-    const form = document.getElementById("form-renda-fixa");
-    const btnCancelar = document.getElementById("btn-cancelar-edicao");
-    const btnLogout = document.getElementById("btn-logout");
+    const form = document.getElementById("form-renda-fixa") || document.querySelector("form");
+    if (form) {
+        form.addEventListener("submit", salvarRendaFixa);
+    }
 
-    if (form) form.addEventListener("submit", salvarRendaFixa);
-    if (btnCancelar) btnCancelar.addEventListener("click", limparFormularioRenda);
+    const btnLogout = document.getElementById("btn-logout");
     if (btnLogout) {
         btnLogout.addEventListener("click", async () => {
             await fetch("/api/auth/logout", { method: "POST" });
@@ -31,115 +24,176 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 });
 
+function exibirAlertaRenda(mensagem, tipo = "success") {
+    let box = document.getElementById("renda-alert") || document.querySelector(".alert-box");
+    if (!box) {
+        const form = document.querySelector("form");
+        if (!form) return;
+        box = document.createElement("div");
+        box.id = "renda-alert";
+        box.className = "alert-box";
+        form.parentElement.insertBefore(box, form);
+    }
+    box.className = `alert-box ${tipo === "success" ? "alert-success" : "alert-error"}`;
+    box.textContent = mensagem;
+    box.style.display = "block";
+    setTimeout(() => { box.style.display = "none"; }, 4000);
+}
+
 async function carregarRendasFixas() {
+    const tbody =
+        document.getElementById("tabela-rendas-body") ||
+        document.getElementById("rendas-tbody") ||
+        document.querySelector("table tbody");
+
     try {
-        const res = await fetch("/api/rendas-fixas", { cache: "no-store" });
+        const res = await fetch(`/api/rendas-fixas?_t=${Date.now()}`, {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store"
+        });
+
         if (res.status === 401) {
             window.location.href = "/";
             return;
         }
-        const data = await res.json();
-        if (!data.sucesso) return;
 
-        listaRendasCache = data.rendas_fixas || [];
-        document.getElementById("total-rendas-fixas").textContent = formatarBRL(data.resumo.total_rendas_fixas);
-        renderizarTabelaRendas();
+        const data = await res.json();
+        const lista = data.rendas_fixas || data.receitas_fixas || data.rendas || data.itens || [];
+
+        const totalAtivo = lista
+            .filter((item) => item.is_active !== false && item.ativo !== false)
+            .reduce((acc, item) => acc + Number(item.valor ?? item.amount ?? 0), 0);
+
+        const elTotal =
+            document.getElementById("total-rendas-fixas") ||
+            document.getElementById("metric-total-rendas") ||
+            document.querySelector(".metric-value, .text-green");
+        if (elTotal) {
+            elTotal.textContent = formatarMoedaBRL(totalAtivo);
+        }
+
+        if (!tbody) return;
+
+        if (lista.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="empty-msg">
+                        Nenhuma renda fixa cadastrada. Adicione ao lado ou envie no Telegram: "Meu salário é uma renda fixa de R$ 4000 todo dia 5".
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = lista.map((r) => {
+            const id = r.id;
+            const desc = r.descricao || r.description || "Renda Fixa";
+            const dia = r.dia_recebimento || r.day_of_month || r.dia || 5;
+            const valor = Number(r.valor ?? r.amount ?? 0);
+            const ativo = r.is_active !== false && r.ativo !== false;
+
+            return `
+                <tr>
+                    <td><strong>${desc}</strong></td>
+                    <td>Todo dia ${dia}</td>
+                    <td class="text-green" style="font-weight:700;">${formatarMoedaBRL(valor)}</td>
+                    <td>
+                        <span class="badge-tipo ${ativo ? "badge-receita" : "badge-despesa"}">
+                            ${ativo ? "Ativa" : "Inativa"}
+                        </span>
+                    </td>
+                    <td>
+                        <button type="button" onclick="alternarStatusRenda(${id}, ${!ativo})"
+                            style="background:transparent; border:1px solid #475569; color:#cbd5e1; padding:4px 8px; border-radius:6px; cursor:pointer; margin-right:6px;">
+                            ${ativo ? "Pausar" : "Ativar"}
+                        </button>
+                        <button type="button" onclick="excluirRendaFixa(${id})"
+                            style="background:rgba(239,68,68,0.18); border:1px solid #ef4444; color:#fca5a5; padding:4px 8px; border-radius:6px; cursor:pointer;">
+                            Excluir
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join("");
     } catch (err) {
         console.error("Erro ao carregar rendas fixas:", err);
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">Não foi possível carregar as rendas fixas.</td></tr>`;
+        }
     }
-}
-
-function renderizarTabelaRendas() {
-    const tbody = document.getElementById("tabela-rendas-body");
-    if (!tbody) return;
-
-    if (listaRendasCache.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">Nenhuma renda fixa cadastrada. Adicione ao lado ou envie no Telegram: "Meu salário é uma renda fixa de R$ 4000".</td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = listaRendasCache.map((item) => `
-        <tr>
-            <td><strong>${item.description}</strong></td>
-            <td>Todo dia <strong>${item.day_of_month}</strong></td>
-            <td class="text-green" style="font-weight:700;">${formatarBRL(item.amount)}</td>
-            <td>
-                <span class="badge-tipo ${item.is_active ? "badge-receita" : "badge-despesa"}">
-                    ${item.is_active ? "Ativa" : "Inativa"}
-                </span>
-            </td>
-            <td>
-                <button type="button" class="btn-refresh" style="padding:4px 8px; font-size:0.8rem;" onclick="prepararEdicaoRenda(${item.id})">✏️ Editar</button>
-                <button type="button" class="btn-logout" style="width:auto; padding:4px 8px; font-size:0.8rem;" onclick="excluirRendaFixa(${item.id})">🗑️ Excluir</button>
-            </td>
-        </tr>
-    `).join("");
 }
 
 async function salvarRendaFixa(e) {
     e.preventDefault();
-    const id = document.getElementById("renda-id").value;
-    const description = document.getElementById("renda-descricao").value.trim();
-    const amount = parseFloat(document.getElementById("renda-valor").value);
-    const day_of_month = parseInt(document.getElementById("renda-dia").value, 10);
-    const is_active = document.getElementById("renda-ativa").value === "true";
+    const form = e.target;
 
-    const url = id ? `/api/rendas-fixas/${id}` : "/api/rendas-fixas";
-    const metodo = id ? "PUT" : "POST";
+    const inputDesc =
+        document.getElementById("renda-descricao") ||
+        document.getElementById("desc-renda") ||
+        form.querySelector("input[type='text']");
+    const inputsNum = form.querySelectorAll("input[type='number']");
+    const inputValor = document.getElementById("renda-valor") || inputsNum[0];
+    const inputDia = document.getElementById("renda-dia") || inputsNum[1];
+    const selectAtivo = document.getElementById("renda-status") || form.querySelector("select");
+
+    const descricao = (inputDesc?.value || "").trim();
+    const valor = parseFloat(String(inputValor?.value || "0").replace(",", "."));
+    const dia = parseInt(inputDia?.value || "5", 10);
+    const is_active = selectAtivo ? !["false", "0", "inativo", "inativa"].includes(selectAtivo.value.toLowerCase()) : true;
+
+    if (!descricao || isNaN(valor) || valor <= 0) {
+        exibirAlertaRenda("Informe uma descrição válida e um valor maior que zero.", "error");
+        return;
+    }
 
     try {
-        const res = await fetch(url, {
-            method: metodo,
+        const res = await fetch("/api/rendas-fixas", {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ description, amount, day_of_month, is_active })
+            credentials: "same-origin",
+            body: JSON.stringify({
+                descricao,
+                description: descricao,
+                valor,
+                amount: valor,
+                dia_recebimento: dia,
+                day_of_month: dia,
+                ativo: is_active,
+                is_active
+            })
         });
         const data = await res.json();
 
         if (res.ok && data.sucesso) {
-            exibirAlertaRenda(id ? "Renda fixa atualizada com sucesso!" : "Renda fixa cadastrada com sucesso!", "success");
-            limparFormularioRenda();
+            exibirAlertaRenda("Renda fixa cadastrada com sucesso!", "success");
+            form.reset();
             localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
-            carregarRendasFixas();
+            await carregarRendasFixas();
         } else {
             exibirAlertaRenda(data.erro || "Erro ao salvar renda fixa.", "error");
         }
     } catch (err) {
-        exibirAlertaRenda("Erro de conexão com o servidor.", "error");
+        exibirAlertaRenda("Erro de comunicação com o servidor.", "error");
     }
 }
 
-function prepararEdicaoRenda(id) {
-    const item = listaRendasCache.find((r) => r.id === id);
-    if (!item) return;
-
-    document.getElementById("form-renda-titulo").textContent = "✏️ Editar Renda Fixa";
-    document.getElementById("renda-id").value = item.id;
-    document.getElementById("renda-descricao").value = item.description;
-    document.getElementById("renda-valor").value = item.amount;
-    document.getElementById("renda-dia").value = item.day_of_month;
-    document.getElementById("renda-ativa").value = item.is_active ? "true" : "false";
-    document.getElementById("btn-salvar-renda").textContent = "Atualizar Renda Fixa";
-    document.getElementById("btn-cancelar-edicao").style.display = "block";
-}
-
-function limparFormularioRenda() {
-    document.getElementById("form-renda-fixa").reset();
-    document.getElementById("renda-id").value = "";
-    document.getElementById("form-renda-titulo").textContent = "➕ Cadastrar Nova Renda Fixa";
-    document.getElementById("btn-salvar-renda").textContent = "Salvar Renda Fixa";
-    document.getElementById("btn-cancelar-edicao").style.display = "none";
+async function alternarStatusRenda(id, novoStatus) {
+    await fetch(`/api/rendas-fixas/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ is_active: novoStatus, ativo: novoStatus })
+    });
+    localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
+    carregarRendasFixas();
 }
 
 async function excluirRendaFixa(id) {
-    if (!confirm("Deseja realmente excluir esta renda fixa?")) return;
-    try {
-        const res = await fetch(`/api/rendas-fixas/${id}`, { method: "DELETE" });
-        const data = await res.json();
-        if (res.ok && data.sucesso) {
-            localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
-            carregarRendasFixas();
-        }
-    } catch (err) {
-        alert("Erro ao excluir registro.");
-    }
+    await fetch(`/api/rendas-fixas/${id}`, {
+        method: "DELETE",
+        credentials: "same-origin"
+    });
+    localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
+    carregarRendasFixas();
 }
