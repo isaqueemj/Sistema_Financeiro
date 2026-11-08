@@ -48,11 +48,7 @@ from core.database import (
 from core.ia import interpretar_mensagem_financeira
 from core.email_service import enviar_email_codigo_2fa, enviar_email_recuperacao_senha
 from core.telegram_bot import iniciar_bot_telegram_background, obter_username_bot, processar_update_telegram
-from core.whatsapp import (
-    WHATSAPP_VERIFY_TOKEN,
-    extrair_dados_webhook_meta,
-    enviar_mensagem_whatsapp_meta
-)
+
 
 load_dotenv()
 
@@ -728,47 +724,6 @@ def webhook_telegram():
     update = request.get_json(silent=True) or {}
     res = processar_update_telegram(update)
     return jsonify(res), 200
-
-
-@app.route("/webhook/whatsapp", methods=["GET", "POST"])
-def webhook_whatsapp():
-    if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-        if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN:
-            return Response(challenge, status=200, mimetype="text/plain")
-        return Response("Token de verificação inválido", status=403)
-
-    if request.form and "Body" in request.form and "From" in request.form:
-        telefone = request.form.get("From", "").replace("whatsapp:", "")
-        texto = request.form.get("Body", "")
-        nome = request.form.get("ProfileName", "Usuário WhatsApp")
-
-        usuario = obter_ou_criar_usuario_por_whatsapp(telefone, nome)
-        salvar_mensagem_historico(usuario["id"], "usuario", texto)
-        resultado = interpretar_mensagem_financeira(usuario["id"], texto)
-        salvar_mensagem_historico(usuario["id"], "ia", resultado["resposta"])
-
-        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>{resultado['resposta']}</Message>
-</Response>"""
-        return Response(twiml, status=200, mimetype="application/xml")
-
-    payload = request.get_json(silent=True) or {}
-    dados_meta = extrair_dados_webhook_meta(payload)
-    if dados_meta:
-        usuario = obter_ou_criar_usuario_por_whatsapp(
-            dados_meta["telefone"],
-            dados_meta["nome"]
-        )
-        salvar_mensagem_historico(usuario["id"], "usuario", dados_meta["texto"])
-        resultado = interpretar_mensagem_financeira(usuario["id"], dados_meta["texto"])
-        salvar_mensagem_historico(usuario["id"], "ia", resultado["resposta"])
-        enviar_mensagem_whatsapp_meta(dados_meta["telefone"], resultado["resposta"])
-
-    return jsonify({"status": "recebido"}), 200
 
 
 if __name__ == "__main__":
