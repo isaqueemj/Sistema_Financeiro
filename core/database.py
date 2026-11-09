@@ -3,6 +3,7 @@ import os
 import re
 import random
 import secrets
+import unicodedata
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -11,6 +12,8 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Numeric, DateTime, ForeignKey, Text, text, func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
+
+from collections import defaultdict
 
 load_dotenv()
 
@@ -1301,75 +1304,360 @@ def remover_gasto_fixo(usuario_id: int, gasto_id: int) -> dict:
         db.close()
 
 
-def obter_resumo_financeiro(usuario_id: int, periodo: str = "mes_atual") -> dict:
-    uid_real = garantir_usuario_sincronizado(usuario_id)
+# def obter_resumo_financeiro(usuario_id: int, periodo: str = "mes_atual") -> dict:
+#     uid_real = garantir_usuario_sincronizado(usuario_id)
+#     db = SessionLocal()
+#     try:
+#         receitas_var = (
+#             db.query(func.coalesce(func.sum(Transacao.valor), 0.0))
+#             .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "receita")
+#             .scalar() or 0.0
+#         )
+#         despesas_var = (
+#             db.query(func.coalesce(func.sum(Transacao.valor), 0.0))
+#             .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "despesa")
+#             .scalar() or 0.0
+#         )
+#         rendas_fixas = (
+#             db.query(func.coalesce(func.sum(ReceitaFixa.valor), 0.0))
+#             .filter(ReceitaFixa.usuario_id == uid_real, ReceitaFixa.ativo == 1)
+#             .scalar() or 0.0
+#         )
+#         gastos_fixos = (
+#             db.query(func.coalesce(func.sum(DespesaFixa.valor), 0.0))
+#             .filter(DespesaFixa.usuario_id == uid_real, DespesaFixa.ativo == 1)
+#             .scalar() or 0.0
+#         )
+#         total_lancamentos = (
+#             db.query(func.count(Transacao.id))
+#             .filter(Transacao.usuario_id == uid_real)
+#             .scalar() or 0
+#         )
+
+#         cats = (
+#             db.query(Transacao.categoria, func.sum(Transacao.valor).label("total"))
+#             .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "despesa")
+#             .group_by(Transacao.categoria)
+#             .order_by(func.sum(Transacao.valor).desc())
+#             .all()
+#         )
+#         por_categoria = [{"categoria": c[0] or "Outros", "total": float(c[1] or 0.0)} for c in cats]
+
+#         total_entradas = float(receitas_var) + float(rendas_fixas)
+#         total_saidas = float(despesas_var) + float(gastos_fixos)
+
+#         labels_pizza = [c["categoria"] for c in por_categoria]
+#         valores_pizza = [c["total"] for c in por_categoria]
+#         if float(gastos_fixos) > 0:
+#             labels_pizza.append("Despesas Fixas")
+#             valores_pizza.append(float(gastos_fixos))
+
+#         return {
+#             "mes_referencia": datetime.utcnow().strftime("%m/%Y"),
+#             "total_receitas": total_entradas,
+#             "total_despesas": total_saidas,
+#             "receitas_variaveis": float(receitas_var),
+#             "despesas_variaveis": float(despesas_var),
+#             "rendas_fixas": float(rendas_fixas),
+#             "total_rendas_fixas": float(rendas_fixas),
+#             "gastos_fixos": float(gastos_fixos),
+#             "total_gastos_fixos": float(gastos_fixos),
+#             "saldo": total_entradas - total_saidas,
+#             "total_lancamentos": int(total_lancamentos),
+#             "despesas_por_categoria": por_categoria,
+#             "grafico_pizza": {
+#                 "labels": labels_pizza,
+#                 "valores": valores_pizza
+#             },
+#             "grafico_colunas": {
+#                 "labels": ["Mês Vigente"],
+#                 "entradas": [total_entradas],
+#                 "saidas": [total_saidas]
+#             }
+#         }
+#     finally:
+#         db.close()
+
+def inicializar_tabela_tetos():
+    """Cria a tabela tetos_gastos com sintaxe compatível com MySQL Workbench."""
     db = SessionLocal()
     try:
-        receitas_var = (
-            db.query(func.coalesce(func.sum(Transacao.valor), 0.0))
-            .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "receita")
-            .scalar() or 0.0
-        )
-        despesas_var = (
-            db.query(func.coalesce(func.sum(Transacao.valor), 0.0))
-            .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "despesa")
-            .scalar() or 0.0
-        )
-        rendas_fixas = (
-            db.query(func.coalesce(func.sum(ReceitaFixa.valor), 0.0))
-            .filter(ReceitaFixa.usuario_id == uid_real, ReceitaFixa.ativo == 1)
-            .scalar() or 0.0
-        )
-        gastos_fixos = (
-            db.query(func.coalesce(func.sum(DespesaFixa.valor), 0.0))
-            .filter(DespesaFixa.usuario_id == uid_real, DespesaFixa.ativo == 1)
-            .scalar() or 0.0
-        )
-        total_lancamentos = (
-            db.query(func.count(Transacao.id))
-            .filter(Transacao.usuario_id == uid_real)
-            .scalar() or 0
-        )
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS tetos_gastos (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id INT NOT NULL,
+                categoria VARCHAR(100) NOT NULL,
+                valor_teto DECIMAL(10,2) NOT NULL,
+                atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_usuario_categoria (usuario_id, categoria),
+                CONSTRAINT fk_limites_orcamento_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        """))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
-        cats = (
-            db.query(Transacao.categoria, func.sum(Transacao.valor).label("total"))
-            .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "despesa")
-            .group_by(Transacao.categoria)
-            .order_by(func.sum(Transacao.valor).desc())
-            .all()
-        )
-        por_categoria = [{"categoria": c[0] or "Outros", "total": float(c[1] or 0.0)} for c in cats]
+# Garante a criação da tabela ao iniciar o módulo
+inicializar_tabela_tetos()
+
+
+def definir_teto_gasto(usuario_id: int, categoria: str, valor_teto: float) -> dict:
+    """Define ou atualiza o teto de gastos mensal para uma categoria ou item específico."""
+    inicializar_tabela_tetos()
+    db = SessionLocal()
+    try:
+        cat_limpa = (categoria or "Outros").strip().capitalize()
+        val = float(valor_teto)
+        if val <= 0:
+            return {"sucesso": False, "erro": "O valor do teto deve ser maior que zero."}
+
+        existente = db.execute(
+            text("SELECT id FROM tetos_gastos WHERE usuario_id = :uid AND LOWER(categoria) = LOWER(:cat)"),
+            {"uid": int(usuario_id), "cat": cat_limpa}
+        ).fetchone()
+
+        if existente:
+            db.execute(
+                text("UPDATE tetos_gastos SET valor_teto = :val, atualizado_em = CURRENT_TIMESTAMP WHERE id = :id"),
+                {"val": val, "id": existente[0]}
+            )
+        else:
+            db.execute(
+                text("INSERT INTO tetos_gastos (usuario_id, categoria, valor_teto) VALUES (:uid, :cat, :val)"),
+                {"uid": int(usuario_id), "cat": cat_limpa, "val": val}
+            )
+        db.commit()
+        return {"sucesso": True, "categoria": cat_limpa, "valor_teto": val}
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": f"Erro ao salvar teto de gastos: {str(e)}"}
+    finally:
+        db.close()
+
+
+def _normalizar_texto_teto(texto: str) -> str:
+    if not texto:
+        return ""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", str(texto).lower().strip())
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+def listar_tetos_gastos(usuario_id: int) -> list:
+    """Retorna todos os tetos configurados pelo usuário cruzando por categoria ou descrição do item."""
+    inicializar_tabela_tetos()
+    db = SessionLocal()
+    try:
+        tetos_rows = db.execute(
+            text("""
+                SELECT id, categoria, valor_teto
+                FROM tetos_gastos
+                WHERE usuario_id = :uid
+                ORDER BY categoria ASC
+            """),
+            {"uid": int(usuario_id)}
+        ).fetchall()
+
+        despesas_rows = db.execute(
+            text("""
+                SELECT categoria, descricao, COALESCE(valor, 0) AS valor
+                FROM transacoes
+                WHERE usuario_id = :uid AND tipo = 'despesa'
+            """),
+            {"uid": int(usuario_id)}
+        ).fetchall()
+
+        resultado = []
+        for row in tetos_rows:
+            row_id = row[0]
+            row_cat = row[1]
+            row_val_teto = float(row[2] or 0.0)
+
+            alvo_norm = _normalizar_texto_teto(row_cat)
+            gasto_atual = 0.0
+
+            for desp in despesas_rows:
+                cat_norm = _normalizar_texto_teto(desp[0] or "Outros")
+                desc_norm = _normalizar_texto_teto(desp[1] or "")
+                val_desp = float(desp[2] or 0.0)
+
+                if cat_norm == alvo_norm or (alvo_norm and alvo_norm in desc_norm):
+                    gasto_atual += val_desp
+
+            gasto_atual = round(gasto_atual, 2)
+            percentual = round((gasto_atual / row_val_teto) * 100, 1) if row_val_teto > 0 else 0.0
+
+            resultado.append({
+                "id": row_id,
+                "categoria": row_cat,
+                "valor_teto": row_val_teto,
+                "gasto_atual": gasto_atual,
+                "disponivel": round(max(0.0, row_val_teto - gasto_atual), 2),
+                "excedente": round(max(0.0, gasto_atual - row_val_teto), 2),
+                "percentual": percentual,
+                "em_alerta": 80.0 <= percentual <= 100.0,
+                "estourou": gasto_atual > row_val_teto
+            })
+        return resultado
+    finally:
+        db.close()
+
+
+def excluir_teto_gasto(usuario_id: int, categoria_ou_id) -> dict:
+    """Remove um teto de gasto por ID ou pelo nome da categoria/item."""
+    inicializar_tabela_tetos()
+    db = SessionLocal()
+    try:
+        if str(categoria_ou_id).isdigit():
+            db.execute(
+                text("DELETE FROM tetos_gastos WHERE id = :id AND usuario_id = :uid"),
+                {"id": int(categoria_ou_id), "uid": int(usuario_id)}
+            )
+        else:
+            db.execute(
+                text("DELETE FROM tetos_gastos WHERE LOWER(categoria) = LOWER(:cat) AND usuario_id = :uid"),
+                {"cat": str(categoria_ou_id).strip(), "uid": int(usuario_id)}
+            )
+        db.commit()
+        return {"sucesso": True}
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": str(e)}
+    finally:
+        db.close()
+
+
+def obter_resumo_financeiro(usuario_id: int, periodo: str = "mes_atual") -> dict:
+    """
+    Calcula o resumo financeiro completo diretamente nas tabelas em português do MySQL:
+    - transacoes (usuario_id, valor, tipo, categoria, descricao)
+    - receitas_fixas (usuario_id, valor, ativo)
+    - despesas_fixas (usuario_id, valor, ativo)
+    - tetos_gastos (via listar_tetos_gastos)
+    """
+    db = SessionLocal()
+    try:
+        uid = int(usuario_id)
+
+        receitas_var = db.execute(
+            text("SELECT COALESCE(SUM(valor), 0) FROM transacoes WHERE usuario_id = :uid AND tipo = 'receita'"),
+            {"uid": uid}
+        ).scalar() or 0.0
+
+        despesas_var = db.execute(
+            text("SELECT COALESCE(SUM(valor), 0) FROM transacoes WHERE usuario_id = :uid AND tipo = 'despesa'"),
+            {"uid": uid}
+        ).scalar() or 0.0
+
+        try:
+            rendas_fixas = db.execute(
+                text("SELECT COALESCE(SUM(valor), 0) FROM receitas_fixas WHERE usuario_id = :uid AND ativo = 1"),
+                {"uid": uid}
+            ).scalar() or 0.0
+        except Exception:
+            db.rollback()
+            rendas_fixas = 0.0
+
+        try:
+            gastos_fixos = db.execute(
+                text("SELECT COALESCE(SUM(valor), 0) FROM despesas_fixas WHERE usuario_id = :uid AND ativo = 1"),
+                {"uid": uid}
+            ).scalar() or 0.0
+        except Exception:
+            db.rollback()
+            gastos_fixos = 0.0
+
+        total_lancamentos = db.execute(
+            text("SELECT COUNT(id) FROM transacoes WHERE usuario_id = :uid"),
+            {"uid": uid}
+        ).scalar() or 0
+
+        # 1. Agrupamento por Categoria (Gráfico de Pizza)
+        cats_rows = db.execute(
+            text("""
+                SELECT COALESCE(categoria, 'Outros') AS categoria, COALESCE(SUM(valor), 0) AS total
+                FROM transacoes
+                WHERE usuario_id = :uid AND tipo = 'despesa'
+                GROUP BY categoria
+                ORDER BY total DESC
+            """),
+            {"uid": uid}
+        ).fetchall()
+
+        por_categoria = [{"categoria": r[0] or "Outros", "total": float(r[1] or 0.0)} for r in cats_rows]
 
         total_entradas = float(receitas_var) + float(rendas_fixas)
         total_saidas = float(despesas_var) + float(gastos_fixos)
+        saldo_atual = total_entradas - total_saidas
 
         labels_pizza = [c["categoria"] for c in por_categoria]
         valores_pizza = [c["total"] for c in por_categoria]
         if float(gastos_fixos) > 0:
-            labels_pizza.append("Despesas Fixas")
+            labels_pizza.append("Gastos Fixos")
             valores_pizza.append(float(gastos_fixos))
+
+        # 2. Evolução Acumulada do Saldo (Gráfico de Linha)
+        movs_rows = db.execute(
+            text("""
+                SELECT id, tipo, COALESCE(valor, 0) AS valor
+                FROM transacoes
+                WHERE usuario_id = :uid
+                ORDER BY id ASC
+            """),
+            {"uid": uid}
+        ).fetchall()
+
+        saldo_base_fixo = float(rendas_fixas) - float(gastos_fixos)
+        labels_evolucao = []
+        saldos_evolucao = []
+        saldo_acumulado = saldo_base_fixo
+
+        if saldo_base_fixo != 0 or not movs_rows:
+            labels_evolucao.append("Base Fixa")
+            saldos_evolucao.append(round(saldo_acumulado, 2))
+
+        for m in movs_rows:
+            mov_id, mov_tipo, mov_val = m[0], m[1], float(m[2] or 0.0)
+            if mov_tipo == "receita":
+                saldo_acumulado += mov_val
+            else:
+                saldo_acumulado -= mov_val
+            labels_evolucao.append(f"#{mov_id}")
+            saldos_evolucao.append(round(saldo_acumulado, 2))
+
+        tetos = listar_tetos_gastos(uid)
 
         return {
             "mes_referencia": datetime.utcnow().strftime("%m/%Y"),
             "total_receitas": total_entradas,
             "total_despesas": total_saidas,
+            "total_entradas": total_entradas,
+            "total_saidas": total_saidas,
             "receitas_variaveis": float(receitas_var),
             "despesas_variaveis": float(despesas_var),
             "rendas_fixas": float(rendas_fixas),
             "total_rendas_fixas": float(rendas_fixas),
             "gastos_fixos": float(gastos_fixos),
             "total_gastos_fixos": float(gastos_fixos),
-            "saldo": total_entradas - total_saidas,
+            "saldo": saldo_atual,
+            "saldo_atual": saldo_atual,
             "total_lancamentos": int(total_lancamentos),
             "despesas_por_categoria": por_categoria,
+            "tetos_gastos": tetos,
             "grafico_pizza": {
                 "labels": labels_pizza,
                 "valores": valores_pizza
             },
             "grafico_colunas": {
-                "labels": ["Mês Vigente"],
+                "labels": ["Entradas vs. Saídas"],
                 "entradas": [total_entradas],
                 "saidas": [total_saidas]
+            },
+            "grafico_evolucao": {
+                "labels": labels_evolucao[-15:],
+                "saldos": saldos_evolucao[-15:]
             }
         }
     finally:

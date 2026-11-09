@@ -43,12 +43,14 @@ from core.database import (
     atualizar_gasto_fixo,
     listar_gastos_fixos,
     remover_gasto_fixo,
-    obter_resumo_financeiro
+    obter_resumo_financeiro,
+    definir_teto_gasto, 
+    listar_tetos_gastos, 
+    excluir_teto_gasto
 )
 from core.ia import interpretar_mensagem_financeira
 from core.email_service import enviar_email_codigo_2fa, enviar_email_recuperacao_senha
 from core.telegram_bot import iniciar_bot_telegram_background, obter_username_bot, processar_update_telegram
-
 
 load_dotenv()
 
@@ -672,11 +674,11 @@ def api_transacoes():
     return jsonify(resultado), (201 if resultado.get("sucesso") else 400)
 
 
-@app.route("/api/transacoes/<int:transacao_id>", methods=["DELETE"])
-@login_obrigatorio
-def api_excluir_transacao(transacao_id: int):
-    res = excluir_transacao(session["user_id"], transacao_id)
-    return jsonify(res), (200 if res.get("sucesso") else 404)
+# @app.route("/api/transacoes/<int:transacao_id>", methods=["DELETE"])
+# @login_obrigatorio
+# def api_excluir_transacao(transacao_id: int):
+#     res = excluir_transacao(session["user_id"], transacao_id)
+#     return jsonify(res), (200 if res.get("sucesso") else 404)
 
 
 @app.route("/api/chat/historico", methods=["GET"])
@@ -717,6 +719,62 @@ def api_chat():
     }), 200
 
 
+@app.route("/pages/teto_gastos.html")
+@login_obrigatorio
+def pagina_teto_gastos():
+    return send_from_directory("web/pages", "teto_gastos.html")
+
+
+@app.route("/api/tetos", methods=["GET", "POST"])
+@login_obrigatorio
+def api_tetos_gastos():
+    user_id = session["user_id"]
+    if request.method == "GET":
+        tetos = listar_tetos_gastos(user_id)
+        resumo = obter_resumo_financeiro(user_id)
+        return jsonify({
+            "sucesso": True,
+            "usuario": {
+                "id": user_id,
+                "nome": session.get("user_nome", "Usuário")
+            },
+            "tetos": tetos,
+            "resumo": resumo
+        }), 200
+
+    dados = request.get_json(silent=True) or {}
+    categoria = (dados.get("categoria") or "").strip()
+    try:
+        valor_teto = float(str(dados.get("valor_teto", 0)).replace(",", "."))
+    except ValueError:
+        return jsonify({"sucesso": False, "erro": "Informe um valor numérico válido."}), 400
+
+    if not categoria or valor_teto <= 0:
+        return jsonify({"sucesso": False, "erro": "Informe a categoria/item e um limite maior que zero."}), 400
+
+    res = definir_teto_gasto(user_id, categoria, valor_teto)
+    res["tetos"] = listar_tetos_gastos(user_id)
+    res["resumo"] = obter_resumo_financeiro(user_id)
+    return jsonify(res), (200 if res.get("sucesso") else 400)
+
+
+@app.route("/api/tetos/<item>", methods=["DELETE"])
+@login_obrigatorio
+def api_excluir_teto(item):
+    user_id = session["user_id"]
+    res = excluir_teto_gasto(user_id, item)
+    res["tetos"] = listar_tetos_gastos(user_id)
+    res["resumo"] = obter_resumo_financeiro(user_id)
+    return jsonify(res), 200
+
+
+@app.route("/api/transacoes/<int:transacao_id>", methods=["DELETE"])
+@login_obrigatorio
+def api_excluir_transacao(transacao_id):
+    user_id = session["user_id"]
+    res = excluir_transacao_por_termo_ou_id(user_id, transacao_id=transacao_id)
+    res["resumo"] = obter_resumo_financeiro(user_id)
+    return jsonify(res), (200 if res["sucesso"] else 404)
 # ==================== WEBHOOKS TELEGRAM E WHATSAPP ====================
 
 @app.route("/webhook/telegram", methods=["POST"])

@@ -1,0 +1,265 @@
+<!-- Caminho: web/pages/teto_gastos.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinanceControl - Teto de Gastos</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+    <link rel="stylesheet" href="/css/teto_gastos.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Menu Lateral Padrão FinanceControl -->
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-icon">💎</span> FinanceControl
+            </div>
+            <nav class="nav-menu">
+                <a href="/pages/dashboard.html" class="nav-item">
+                    <span>📊</span> Dashboard
+                </a>
+                <a href="/pages/rendas_fixas.html" class="nav-item">
+                    <span>💼</span> Rendas Fixas
+                </a>
+                <a href="/pages/gastos_fixos.html" class="nav-item">
+                    <span>📌</span> Gastos Fixos
+                </a>
+                <a href="/pages/teto_gastos.html" class="nav-item active">
+                    <span>🎯</span> Teto de Gastos
+                </a>
+                <a href="/pages/assistente.html" class="nav-item">
+                    <span>🤖</span> Assistente IA
+                </a>
+                <a href="/pages/configuracoes.html" class="nav-item">
+                    <span>⚙️</span> Configurações
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="btn-logout" class="btn-logout">Sair da Conta</button>
+            </div>
+        </aside>
+
+        <!-- Conteúdo Principal -->
+        <main class="main-content">
+            <header class="page-header">
+                <div>
+                    <h1>Gerenciamento de Teto de Gastos</h1>
+                    <p>Defina limites máximos de orçamento por categoria ou item e acompanhe o consumo em tempo real</p>
+                </div>
+                <div class="header-actions">
+                    <span class="user-greeting" id="teto-user-name">Olá, Usuário</span>
+                    <button id="btn-refresh-tetos" class="btn-refresh" type="button">🔄 Atualizar</button>
+                </div>
+            </header>
+
+            <!-- 1. CARDS DE INDICADORES DO ORÇAMENTO -->
+            <section class="metrics-grid">
+                <div class="metric-card card-saldo">
+                    <div class="metric-top">
+                        <span class="metric-label">Orçamento Total (Soma dos Tetos)</span>
+                        <span class="metric-icon">🎯</span>
+                    </div>
+                    <strong class="metric-value" id="metric-total-tetos">R$ 0,00</strong>
+                    <div class="metric-sub" id="sub-qtd-tetos">0 categorias monitoradas</div>
+                </div>
+
+                <div class="metric-card card-despesa">
+                    <div class="metric-top">
+                        <span class="metric-label">Total Consumido nos Tetos</span>
+                        <span class="metric-icon">📉</span>
+                    </div>
+                    <strong class="metric-value text-red" id="metric-total-gasto-tetos">R$ 0,00</strong>
+                    <div class="metric-sub" id="sub-perc-geral">0% do limite global utilizado</div>
+                </div>
+
+                <div class="metric-card card-receita">
+                    <div class="metric-top">
+                        <span class="metric-label">Margem Disponível nos Tetos</span>
+                        <span class="metric-icon">🛡️</span>
+                    </div>
+                    <strong class="metric-value text-green" id="metric-margem-disponivel">R$ 0,00</strong>
+                    <div class="metric-sub" id="sub-status-alertas">Todos os limites sob controle</div>
+                </div>
+            </section>
+
+            <!-- 2. GRÁFICO COMPARATIVO -->
+            <section class="panel-card chart-teto-section">
+                <div class="panel-header-inline">
+                    <div>
+                        <h2>📊 Comparativo: Teto Máximo vs. Gasto Realizado por Categoria</h2>
+                        <p class="chart-subtitle">Acompanhe visualmente quais categorias estão próximas de estourar o orçamento</p>
+                    </div>
+                    <a href="/pages/assistente.html" class="link-ia">🤖 Definir via Chatbot &rarr;</a>
+                </div>
+                <div class="teto-chart-wrapper">
+                    <canvas id="chart-comparativo-tetos"></canvas>
+                    <div id="chart-tetos-empty" class="empty-msg" style="display: none;">
+                        Cadastre seu primeiro Teto de Gastos abaixo para visualizar o gráfico comparativo.
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. DOIS FORMULÁRIOS EM COLUNAS (LADO A LADO) -->
+            <section class="forms-columns-grid">
+                <!-- Coluna 1: Formulário de Definir / Editar Teto -->
+                <div class="panel-card form-card-col">
+                    <div class="panel-header-inline">
+                        <div>
+                            <h2 id="titulo-form-teto">➕ Definir Teto de Gastos</h2>
+                            <p class="chart-subtitle">Configure um limite mensal para categoria oficial ou item específico</p>
+                        </div>
+                    </div>
+
+                    <div id="teto-alert" class="alert-box"></div>
+
+                    <form id="form-teto-gasto">
+                        <div class="form-row-cols">
+                            <div class="form-group">
+                                <label for="select-tipo-alvo">Tipo de Limite</label>
+                                <select id="select-tipo-alvo">
+                                    <option value="categoria">📂 Categoria Oficial</option>
+                                    <option value="item">🏷️ Item Específico</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="box-select-categoria">
+                                <label for="input-categoria-teto">Categoria</label>
+                                <select id="input-categoria-teto">
+                                    <option value="Alimentação">🛒 Alimentação</option>
+                                    <option value="Moradia">🏠 Moradia</option>
+                                    <option value="Transporte">🚗 Transporte</option>
+                                    <option value="Lazer">🎬 Lazer</option>
+                                    <option value="Saúde">💊 Saúde</option>
+                                    <option value="Educação">📚 Educação</option>
+                                    <option value="Vestuário">👕 Vestuário</option>
+                                    <option value="Outros">📌 Outros</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="box-input-item" style="display: none;">
+                                <label for="input-item-especifico">Nome do Item / Local</label>
+                                <input type="text" id="input-item-especifico" placeholder="Ex: Padaria, Uber, iFood">
+                            </div>
+                        </div>
+
+                        <div class="form-row-cols align-end">
+                            <div class="form-group">
+                                <label for="input-valor-teto">Valor do Teto Mensal (R$)</label>
+                                <input type="number" id="input-valor-teto" step="0.01" min="1" required placeholder="Ex: 600.00">
+                            </div>
+
+                            <div class="form-actions-teto">
+                                <button type="submit" class="btn-submit-trans" id="btn-salvar-teto">
+                                    Salvar Teto
+                                </button>
+                                <button type="button" class="btn-cancel-edit" id="btn-cancelar-edicao" style="display: none;">
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <div class="chat-tip-box">
+                        <strong>💡 Dica do Assistente IA:</strong>
+                        <span>No chat, envie <code>teto Alimentação 600</code> para criar limites rapidamente.</span>
+                    </div>
+                </div>
+
+                <!-- Coluna 2: Novo Formulário de Lançamento Rápido + Simulador de Impacto -->
+                <div class="panel-card form-card-col">
+                    <div class="panel-header-inline">
+                        <div>
+                            <h2>⚡ Lançar Gasto e Simular Impacto</h2>
+                            <p class="chart-subtitle">Veja o impacto no orçamento antes de confirmar e atualize o consumo na hora</p>
+                        </div>
+                    </div>
+
+                    <div id="simulador-alert" class="alert-box"></div>
+
+                    <form id="form-gasto-rapido-teto">
+                        <div class="form-row-cols">
+                            <div class="form-group">
+                                <label for="rapido-categoria">Categoria do Gasto</label>
+                                <select id="rapido-categoria" required>
+                                    <option value="Alimentação">🛒 Alimentação</option>
+                                    <option value="Transporte">🚗 Transporte</option>
+                                    <option value="Moradia">🏠 Moradia</option>
+                                    <option value="Lazer">🎬 Lazer</option>
+                                    <option value="Saúde">💊 Saúde</option>
+                                    <option value="Educação">📚 Educação</option>
+                                    <option value="Vestuário">👕 Vestuário</option>
+                                    <option value="Outros">📌 Outros</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="rapido-valor">Valor do Gasto (R$)</label>
+                                <input type="number" id="rapido-valor" step="0.01" min="0.01" required placeholder="Ex: 45.00">
+                            </div>
+                        </div>
+
+                        <div class="form-row-cols align-end">
+                            <div class="form-group">
+                                <label for="rapido-descricao">Descrição / Local</label>
+                                <input type="text" id="rapido-descricao" required placeholder="Ex: Uber, Mercado, Farmácia">
+                            </div>
+
+                            <div class="form-actions-teto">
+                                <button type="submit" class="btn-submit-trans btn-submit-green" id="btn-lancar-rapido">
+                                    Registrar Gasto
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Caixa de Prévia em Tempo Real do Impacto no Teto -->
+                    <div class="simulador-preview-box" id="box-preview-impacto">
+                        <div class="simulador-preview-header">
+                            <span id="preview-texto-cat">📊 Simulação de Impacto no Teto</span>
+                            <strong id="preview-perc-futuro">0.0%</strong>
+                        </div>
+                        <div class="progress-track">
+                            <div id="preview-barra-fill" class="progress-bar-fill fill-safe" style="width: 0%;"></div>
+                        </div>
+                        <small id="preview-detalhe-margem">Digite um valor acima para simular o consumo da categoria.</small>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. TABELA DE LIMITES ATIVOS EM LARGURA TOTAL (SEM CORTAR BOTÕES) -->
+            <section class="panel-card table-full-card">
+                <div class="panel-header-inline">
+                    <div>
+                        <h2>📋 Limites Ativos e Consumo Mensal</h2>
+                        <p class="chart-subtitle">Barras verdes (seguro), amarelas (&ge; 80%) e vermelhas (teto excedido)</p>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="transacoes-table tetos-table">
+                        <thead>
+                            <tr>
+                                <th>Categoria / Item</th>
+                                <th>Gasto Atual</th>
+                                <th>Teto Definido</th>
+                                <th>Progresso do Orçamento</th>
+                                <th>Status</th>
+                                <th style="text-align: right;">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabela-tetos-body">
+                            <tr>
+                                <td colspan="6" class="empty-msg">Carregando tetos de gastos...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/js/teto_gastos.js"></script>
+</body>
+</html>

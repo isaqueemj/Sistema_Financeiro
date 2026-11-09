@@ -1,53 +1,107 @@
+<!-- Caminho: web/pages/assistente.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FinanceControl - Assistente IA</title>
-  <link rel="stylesheet" href="../css/assistente.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistente Financeiro IA - FinanceControl</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+    <link rel="stylesheet" href="/css/assistente.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
+<body>
+    <div class="app-layout">
+        <!-- Menu Lateral -->
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-icon">💎</span> FinanceControl
+            </div>
+            <nav class="nav-menu">
+                <a href="/pages/dashboard.html" class="nav-item">
+                    <span>📊</span> Dashboard
+                </a>
+                <a href="/pages/rendas_fixas.html" class="nav-item">
+                    <span>💼</span> Rendas Fixas
+                </a>
+                <a href="/pages/gastos_fixos.html" class="nav-item">
+                    <span>📌</span> Gastos Fixos
+                </a>
+                <a href="/pages/teto_gastos.html" class="nav-item">
+                    <span>🎯</span> Teto de Gastos
+                </a>
+                <a href="/pages/assistente.html" class="nav-item active">
+                    <span>🤖</span> Assistente IA
+                </a>
+                <a href="/pages/configuracoes.html" class="nav-item">
+                    <span>⚙️</span> Configurações
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="btn-logout" class="btn-logout">Sair da Conta</button>
+            </div>
+        </aside>
 
-<body class="dark-theme">
-  <aside class="sidebar">
-    <h2>FinanceControl</h2>
-    <nav class="nav-menu">
-        <a href="/pages/dashboard.html" class="nav-item"><span>📊</span> Dashboard</a>
-        <a href="/pages/rendas_fixas.html" class="nav-item"><span>💼</span> Rendas Fixas</a>
-        <a href="/pages/gastos_fixos.html" class="nav-item"><span>📌</span> Gastos Fixos</a>
-        <a href="/pages/assistente.html" class="nav-item"><span>🤖</span> Assistente IA</a>
-        <a href="/pages/configuracoes.html" class="nav-item"><span>⚙️</span> Configurações</a>
-    </nav>
-  </aside>
+        <!-- Área Principal do Assistente (Foco Total no Chat) -->
+        <main class="main-content assistant-workspace">
+            <section class="chat-wrapper">
+                <header class="chat-header">
+                    <div class="chat-agent-info">
+                        <div class="agent-avatar">🤖</div>
+                        <div>
+                            <h1>Assistente Financeiro Inteligente</h1>
+                            <span class="agent-status">
+                                <span class="status-dot"></span> Online • <strong id="chat-user-greeting">Olá, Usuário</strong>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="chat-balance-pill">
+                        <span>Saldo Atual:</span>
+                        <strong id="chat-header-saldo">R$ 0,00</strong>
+                    </div>
+                </header>
 
-  <main class="main-content">
-    <header class="topbar">
-      <div>
-        <h1>Assistente Financeiro IA</h1>
-        <p class="subtitle">Tire dúvidas e peça análises sobre suas finanças</p>
-      </div>
-      <div class="topbar-actions">
-        Olá, <span id="nome-usuario-topo">{{ nome_usuario | default('Usuário', true) }}</span>
-      </div>
-    </header>
+                <!-- Barra de Comandos Rápidos -->
+                <div class="quick-actions-bar">
+                    <button type="button" class="chip-action" onclick="enviarComandoRapido('extrato')">📋 Extrato Agrupado</button>
+                    <button type="button" class="chip-action" onclick="enviarComandoRapido('me manda o gráfico')">📊 Ver Gráficos no Chat</button>
+                    <button type="button" class="chip-action" onclick="preencherInput('quanto gastei em ')">🔎 Consultar Item/Categoria</button>
+                    <button type="button" class="chip-action" onclick="preencherInput('apague ')">🗑️ Apagar Item (#ID)</button>
+                </div>
 
-    <section class="chat-container">
-      <div id="chatMessages" class="chat-messages">
-        <div class="message bot">
-          <div class="message-content">
-            Olá! Sou o seu assistente inteligente integrado ao FinanceControl. Como posso ajudar com as suas finanças hoje?
-          </div>
-        </div>
-      </div>
+                <!-- Histórico de Mensagens -->
+                <div id="chat-messages" class="chat-messages">
+                    <div class="msg-row bot">
+                        <div class="msg-avatar">🤖</div>
+                        <div class="msg-bubble">
+                            <p>Olá! Sou seu <strong>Assistente Financeiro Inteligente</strong>.</p>
+                            <p>Posso gerenciar todas as suas finanças por texto:</p>
+                            <ul>
+                                <li><strong>Lançar gastos/ganhos:</strong> <code>gastei 50 reais na padaria</code> ou <code>recebi 300 de freela</code></li>
+                                <li><strong>Consultar item ou categoria:</strong> <code>quanto gastei em padaria</code> ou <code>extrato em alimentação</code></li>
+                                <li><strong>Editar ou Apagar por ID:</strong> <code>editar padaria para 35 reais</code> ou <code>apague 26</code></li>
+                                <li><strong>Aconselhamento e Gráficos:</strong> <code>posso comprar um relógio de 150 reais?</code> ou <code>me manda o gráfico</code></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
 
-      <div class="chat-input-area">
-        <form id="chatForm">
-          <input type="text" id="userInput" placeholder="Digite sua pergunta para a IA..." autocomplete="off">
-          <button type="submit" class="btn-primary">Enviar</button>
-        </form>
-      </div>
-    </section>
-  </main>
+                <!-- Formulário de Envio -->
+                <form id="chat-form" class="chat-input-bar">
+                    <input
+                        type="text"
+                        id="chat-input"
+                        autocomplete="off"
+                        placeholder="Digite aqui (ex: 'apague 26', 'quanto gastei em padaria', 'me manda o gráfico')..."
+                        required
+                    >
+                    <button type="submit" id="btn-send-chat" class="btn-send-chat">
+                        <span>Enviar</span> ➤
+                    </button>
+                </form>
+            </section>
+        </main>
+    </div>
 
-  <script src="../js/assistente.js"></script>
+    <script src="/js/assistente.js"></script>
 </body>
 </html>

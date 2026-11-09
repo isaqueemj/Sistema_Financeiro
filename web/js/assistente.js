@@ -1,135 +1,208 @@
-document.addEventListener("DOMContentLoaded", async () => {
-    const spanNome = document.getElementById("nome-usuario-topo"); // ajuste para o ID ou classe do seu HTML
+// Caminho: web/js/assistente.js
+function formatarMoeda(valor) {
+    return Number(valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
 
-    // 1. Tenta carregar rápido do localStorage
-    const nomeSalvo = localStorage.getItem("nome_usuario");
-    if (spanNome && nomeSalvo) {
-        spanNome.textContent = nomeSalvo;
+function formatarMarkdownParaHTML(texto) {
+    if (!texto) return "";
+    return texto
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*([^*]+)\*/g, "<strong>$1</strong>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\n/g, "<br>");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    carregarDadosUsuarioESaldo();
+
+    const chatForm = document.getElementById("chat-form");
+    if (chatForm) {
+        chatForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const input = document.getElementById("chat-input");
+            const msg = input.value.trim();
+            if (!msg) return;
+            input.value = "";
+            await enviarMensagemAoBot(msg);
+        });
     }
 
-    // 2. Confirma com a sessão do servidor Flask
-    try {
-        const resp = await fetch("/api/me");
-        if (resp.ok) {
-            const dados = await resp.json();
-            if (dados.nome && spanNome) {
-                spanNome.textContent = dados.nome;
-                localStorage.setItem("nome_usuario", dados.nome);
-            }
-        }
-    } catch (err) {
-        console.error("Erro ao carregar dados do usuário:", err);
+    const btnLogout = document.getElementById("btn-logout");
+    if (btnLogout) {
+        btnLogout.addEventListener("click", async () => {
+            await fetch("/api/auth/logout", { method: "POST" });
+            localStorage.removeItem("usuario_logado");
+            window.location.href = "/";
+        });
     }
 });
 
-document.addEventListener("DOMContentLoaded", () => {
-    carregarHistoricoConversa();
+function preencherInput(texto) {
+    const input = document.getElementById("chat-input");
+    if (input) {
+        input.value = texto;
+        input.focus();
+    }
+}
 
-    const inputMsg = document.querySelector("input[type='text'], textarea, #chat-input");
-    if (inputMsg) {
-        inputMsg.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                enviarMensagemIa();
+function enviarComandoRapido(comando) {
+    enviarMensagemAoBot(comando);
+}
+
+function adicionarBalaoMensagem(remetente, textoHTML, graficos = null) {
+    const container = document.getElementById("chat-messages");
+    const row = document.createElement("div");
+    row.className = `msg-row ${remetente}`;
+
+    const hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const avatar = remetente === "user" ? "👤" : "🤖";
+
+    const idGraficoUnico = `chat-chart-${Date.now()}`;
+    let htmlGraficos = "";
+    if (graficos) {
+        htmlGraficos = `
+            <div class="chat-charts-box">
+                <div class="chat-chart-item"><canvas id="${idGraficoUnico}-pizza"></canvas></div>
+                <div class="chat-chart-item"><canvas id="${idGraficoUnico}-barras"></canvas></div>
+                <div class="chat-chart-item"><canvas id="${idGraficoUnico}-linha"></canvas></div>
+            </div>
+        `;
+    }
+
+    row.innerHTML = `
+        <div class="msg-avatar">${avatar}</div>
+        <div class="msg-bubble">
+            <div>${textoHTML}</div>
+            ${htmlGraficos}
+            <span class="msg-time">${hora}</span>
+        </div>
+    `;
+
+    container.appendChild(row);
+    container.scrollTop = container.scrollHeight;
+
+    if (graficos) {
+        renderizarGraficosNoBalao(idGraficoUnico, graficos);
+    }
+}
+
+function renderizarGraficosNoBalao(prefixoId, graficos) {
+    const ctxPizza = document.getElementById(`${prefixoId}-pizza`);
+    if (ctxPizza) {
+        new Chart(ctxPizza, {
+            type: "doughnut",
+            data: {
+                labels: graficos.pizza?.labels?.length ? graficos.pizza.labels : ["Sem gastos"],
+                datasets: [{
+                    data: graficos.pizza?.valores?.length ? graficos.pizza.valores : [1],
+                    backgroundColor: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: "#f8fafc", font: { size: 10 } } } }
             }
         });
     }
 
-    const botoes = document.querySelectorAll("button");
-    botoes.forEach((btn) => {
-        if (btn.textContent.trim().toLowerCase() === "enviar") {
-            btn.addEventListener("click", (e) => {
-                e.preventDefault();
-                enviarMensagemIa();
-            });
-        }
-    });
-});
-
-function obterContainerMensagens() {
-    return (
-        document.getElementById("chat-messages") ||
-        document.querySelector(".chat-messages") ||
-        document.querySelector(".messages-container") ||
-        document.querySelector("main div div")
-    );
-}
-
-function adicionarBalaoMensagem(texto, remetente) {
-    const container = obterContainerMensagens();
-    if (!container) return;
-
-    const msgDiv = document.createElement("div");
-    msgDiv.style.maxWidth = "78%";
-    msgDiv.style.padding = "12px 16px";
-    msgDiv.style.borderRadius = "12px";
-    msgDiv.style.marginBottom = "12px";
-    msgDiv.style.lineHeight = "1.45";
-    msgDiv.style.whiteSpace = "pre-wrap";
-
-    if (remetente === "usuario") {
-        msgDiv.style.marginLeft = "auto";
-        msgDiv.style.backgroundColor = "#3b82f6";
-        msgDiv.style.color = "#ffffff";
-    } else {
-        msgDiv.style.marginRight = "auto";
-        msgDiv.style.backgroundColor = "#1e293b";
-        msgDiv.style.color = "#f8fafc";
+    const ctxBarras = document.getElementById(`${prefixoId}-barras`);
+    if (ctxBarras) {
+        new Chart(ctxBarras, {
+            type: "bar",
+            data: {
+                labels: ["Entradas", "Saídas"],
+                datasets: [{
+                    label: "R$",
+                    data: [graficos.colunas?.entradas?.[0] || 0, graficos.colunas?.saidas?.[0] || 0],
+                    backgroundColor: ["#10b981", "#ef4444"],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { color: "#cbd5e1" } },
+                    y: { ticks: { color: "#cbd5e1" } }
+                }
+            }
+        });
     }
 
-    msgDiv.textContent = texto;
-    container.appendChild(msgDiv);
-    container.scrollTop = container.scrollHeight;
-}
-
-async function carregarHistoricoConversa() {
-    try {
-        const res = await fetch("/api/chat/historico", { cache: "no-store" });
-        if (res.status === 401) {
-            window.location.href = "/";
-            return;
-        }
-        const data = await res.json();
-        if (data.sucesso && Array.isArray(data.historico) && data.historico.length > 0) {
-            const container = obterContainerMensagens();
-            if (container) container.innerHTML = "";
-            data.historico.forEach((item) => {
-                adicionarBalaoMensagem(item.mensagem, item.remetente);
-            });
-        }
-    } catch (err) {
-        console.error("Erro ao sincronizar histórico:", err);
+    const ctxLinha = document.getElementById(`${prefixoId}-linha`);
+    if (ctxLinha) {
+        new Chart(ctxLinha, {
+            type: "line",
+            data: {
+                labels: graficos.evolucao?.labels || ["Hoje"],
+                datasets: [{
+                    label: "Saldo (R$)",
+                    data: graficos.evolucao?.saldos || [0],
+                    borderColor: "#3b82f6",
+                    backgroundColor: "rgba(59, 130, 246, 0.2)",
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: "#f8fafc", font: { size: 10 } } } },
+                scales: {
+                    x: { ticks: { color: "#cbd5e1" } },
+                    y: { ticks: { color: "#cbd5e1" } }
+                }
+            }
+        });
     }
 }
 
-async function enviarMensagemIa() {
-    const inputMsg = document.querySelector("input[type='text'], textarea, #chat-input");
-    if (!inputMsg) return;
-
-    const texto = inputMsg.value.trim();
-    if (!texto) return;
-
-    adicionarBalaoMensagem(texto, "usuario");
-    inputMsg.value = "";
+async function enviarMensagemAoBot(mensagem) {
+    adicionarBalaoMensagem("user", formatarMarkdownParaHTML(mensagem));
 
     try {
         const res = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mensagem: texto })
+            body: JSON.stringify({ mensagem })
         });
         const data = await res.json();
 
-        if (res.ok && data.sucesso) {
-            adicionarBalaoMensagem(data.resposta, "ia");
-            // Dispara sincronização imediata com a aba de Dashboard
-            if (data.transacao_registrada) {
-                localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
-            }
-        } else {
-            adicionarBalaoMensagem(data.erro || "Não foi possível processar sua mensagem.", "ia");
-        }
+        const textoBot = formatarMarkdownParaHTML(data.resposta || "Comando processado.");
+        const graficosChat = data.exibir_graficos_web ? data.graficos : null;
+
+        adicionarBalaoMensagem("bot", textoBot, graficosChat);
+        await carregarDadosUsuarioESaldo();
     } catch (err) {
-        adicionarBalaoMensagem("Erro de conexão: Verifique se o servidor Flask está rodando.", "ia");
+        adicionarBalaoMensagem("bot", "⚠️ Erro de comunicação com o servidor.");
+    }
+}
+
+async function carregarDadosUsuarioESaldo() {
+    try {
+        const res = await fetch("/api/dashboard/stats", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.sucesso) return;
+
+        const resumo = data.resumo;
+        const elSaldo = document.getElementById("chat-header-saldo");
+        if (elSaldo) {
+            elSaldo.textContent = formatarMoeda(resumo.saldo);
+            elSaldo.className = resumo.saldo < 0 ? "text-red" : "text-green";
+        }
+
+        // Exibe o nome do usuário em destaque no cabeçalho do assistente
+        const elGreeting = document.getElementById("chat-user-greeting");
+        if (elGreeting && data.usuario && data.usuario.nome) {
+            elGreeting.textContent = `Olá, ${data.usuario.nome}`;
+        }
+    } catch (e) {
+        console.error("Erro ao carregar dados do usuário:", e);
     }
 }

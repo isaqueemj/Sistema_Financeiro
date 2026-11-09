@@ -1,0 +1,279 @@
+/* Caminho: web/css/teto_gastos.css */
+
+.metrics-grid {
+    margin-bottom: 2rem;
+    gap: 1.5rem;
+}
+
+.chart-teto-section {
+    margin-bottom: 2rem;
+}
+
+.teto-chart-wrapper {
+    position: relative;
+    height: 250px;
+    width: 100%;
+    margin-top: 1rem;
+}
+
+/* Dois Formulários Lado a Lado com Espaçamento */
+.forms-columns-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.8rem;
+    margin-bottom: 2rem;
+    align-items: stretch;
+    width: 100%;
+}
+
+.form-card-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 1.6rem;
+    min-width: 0;
+}
+
+#form-teto-gasto,
+#form-gasto-rapido-teto {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    margin-top: 0.6rem;
+}
+
+.form-row-cols {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: start;
+}
+
+.form-row-cols.align-end {
+    align-items: end;
+}
+
+.form-card-col .form-group {
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.form-card-col label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #cbd5e1;
+    margin-bottom: 0;
+}
+
+.form-card-col input,
+.form-card-col select {
+    width: 100%;
+    padding: 0.75rem 0.9rem;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background-color: #0f172a;
+    color: #f8fafc;
+    font-size: 0.9rem;
+    box-sizing: border-box;
+}
+
+.form-card-col input:focus,
+.form-card-col select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
+/* Botões dos Formulários */
+.form-actions-teto {
+    display: flex;
+    flex-direction: row;
+    gap: 0.6rem;
+    width: 100%;
+}
+
+.form-actions-teto .btn-submit-trans {
+    flex: 1;
+    padding: 0.78rem 1rem;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.btn-submit-green {
+    background: linear-gradient(135deg, #10b981, #059669) !important;
+}
+
+.btn-cancel-edit {
+    padding: 0.78rem 1rem;
+    background: transparent;
+    color: #cbd5e1;
+    border: 1px solid #475569;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* Boxes de Dica e Simulador com Barra de Progresso */
+.chat-tip-box,
+.simulador-preview-box {
+    margin-top: 1.2rem;
+    padding: 0.95rem 1.1rem;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px dashed #334155;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    color: #94a3b8;
+}
+
+.simulador-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.45rem;
+    color: #e2e8f0;
+    font-size: 0.82rem;
+}
+
+.simulador-preview-box small {
+    display: block;
+    margin-top: 0.45rem;
+    color: #94a3b8;
+    font-size: 0.78rem;
+}
+
+/* Tabela em Largura Total */
+.table-full-card {
+    width: 100%;
+    margin-bottom: 2rem;
+    padding: 1.6rem;
+}
+
+/* Barra de Progresso */
+.progress-cell {
+    min-width: 190px;
+    width: 28%;
+}
+
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: #94a3b8;
+    margin-bottom: 0.35rem;
+}
+
+.progress-track {
+    width: 100%;
+    height: 10px;
+    background-color: #0b1320;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid #1e293b;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.35s ease;
+}
+
+.fill-safe {
+    background: linear-gradient(90deg, #10b981, #059669);
+}
+
+.fill-warning {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.fill-danger {
+    background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+
+/* Badges de Status */
+.badge-status-teto {
+    padding: 0.32rem 0.72rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: inline-block;
+    white-space: nowrap;
+}
+
+.status-ok {
+    background: rgba(16, 185, 129, 0.16);
+    color: #6ee7b7;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.status-warn {
+    background: rgba(245, 158, 11, 0.16);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.status-danger {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+/* Botões Editar e Excluir */
+.teto-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: flex-end;
+    white-space: nowrap;
+}
+
+.btn-action-edit,
+.btn-action-del {
+    padding: 0.42rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    white-space: nowrap;
+}
+
+.btn-action-edit {
+    background: rgba(59, 130, 246, 0.16);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.45);
+}
+
+.btn-action-edit:hover {
+    background: #3b82f6;
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+}
+
+.btn-action-del {
+    background: rgba(239, 68, 68, 0.16);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.btn-action-del:hover {
+    background: #ef4444;
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
+}
+
+@media (max-width: 1080px) {
+    .forms-columns-grid {
+        grid-template-columns: 1fr;
+    }
+}
