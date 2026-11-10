@@ -3,7 +3,6 @@ import os
 import re
 import random
 import secrets
-import unicodedata
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -12,8 +11,6 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Numeric, DateTime, ForeignKey, Text, text, func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
-
-from collections import defaultdict
 
 load_dotenv()
 
@@ -70,7 +67,7 @@ Base = declarative_base()
 
 
 # =====================================================================
-# MODELOS ORM (MAPEADOS EXCLUSIVAMENTE PARA AS 9 TABELAS EM PORTUGUÊS)
+# MODELOS ORM (TABELAS EM PORTUGUÊS)
 # =====================================================================
 
 class Usuario(Base):
@@ -82,6 +79,7 @@ class Usuario(Base):
     senha_hash = Column(String(255), nullable=False)
     telegram_username = Column(String(50), unique=True, nullable=True)
     telegram_id = Column(String(50), unique=True, nullable=True)
+    telegram_chat_id = Column(String(64), nullable=True)
     primeiro_login = Column(Integer, default=1)
     status_2fa = Column(Integer, default=0)
     codigo_2fa = Column(String(10), nullable=True)
@@ -130,6 +128,16 @@ class ReceitaFixa(Base):
     dia_recebimento = Column(Integer, default=1)
     ativo = Column(Integer, default=1)
     criado_em = Column(DateTime, default=datetime.utcnow)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TetoGasto(Base):
+    __tablename__ = "tetos_gastos"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    categoria = Column(String(100), nullable=False)
+    valor_teto = Column(Numeric(10, 2), nullable=False)
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -190,7 +198,7 @@ class TokenMobile(Base):
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-# Aliases para caso algum módulo externo importe os nomes antigos
+# Aliases de compatibilidade
 User = Usuario
 Transaction = Transacao
 FixedExpense = DespesaFixa
@@ -199,15 +207,11 @@ ChatMessage = MensagemChat
 MobileToken = TokenMobile
 
 
-# =====================================================================
-# INICIALIZAÇÃO E VALIDAÇÃO DE USUÁRIO NA TABELA `usuarios`
-# =====================================================================
-
 def garantir_colunas_autenticacao_2fa():
-    """Garante colunas na tabela `usuarios` caso o banco seja antigo."""
     comandos = [
         "ALTER TABLE usuarios ADD COLUMN telegram_username VARCHAR(50) NULL",
         "ALTER TABLE usuarios ADD COLUMN telegram_id VARCHAR(50) NULL",
+        "ALTER TABLE usuarios ADD COLUMN telegram_chat_id VARCHAR(64) NULL",
         "ALTER TABLE usuarios ADD COLUMN primeiro_login TINYINT DEFAULT 1",
         "ALTER TABLE usuarios ADD COLUMN status_2fa TINYINT DEFAULT 0",
         "ALTER TABLE usuarios ADD COLUMN codigo_2fa VARCHAR(10) NULL",
@@ -229,10 +233,6 @@ def init_db():
 
 
 def garantir_usuario_sincronizado(usuario_id: int = None, nome: str = None, email: str = None) -> int:
-    """
-    Garante que o ID do usuário logado exista na tabela `usuarios` antes de gravar
-    em `mensagens_chat`, `tokens_mobile`, `despesas_fixas`, `receitas_fixas` ou `transacoes`.
-    """
     db = SessionLocal()
     try:
         if usuario_id:
@@ -250,8 +250,8 @@ def garantir_usuario_sincronizado(usuario_id: int = None, nome: str = None, emai
             return primeiro.id
 
         novo = Usuario(
-            nome=(nome or "Isaque Eugenio de Melo Junior").strip(),
-            email=(email or "isaqueemj@gmail.com").strip().lower(),
+            nome=(nome or "Usuário Principal").strip(),
+            email=(email or "admin@financecontrol.local").strip().lower(),
             senha_hash=generate_password_hash("123456", method="pbkdf2:sha256", salt_length=16),
             primeiro_login=0,
             status_2fa=1
@@ -267,10 +267,6 @@ def garantir_usuario_sincronizado(usuario_id: int = None, nome: str = None, emai
     finally:
         db.close()
 
-
-# =====================================================================
-# FUNÇÕES AUXILIARES
-# =====================================================================
 
 def normalizar_username_telegram(telegram: str) -> str:
     limpo = (telegram or "").strip().lstrip("@").strip()
@@ -342,6 +338,7 @@ def criar_usuario_com_telegram_obrigatorio(
             senha_hash=senha_hash,
             telegram_username=telegram_limpo,
             telegram_id=tg_id_limpo,
+            telegram_chat_id=tg_id_limpo,
             primeiro_login=1,
             status_2fa=0
         )
@@ -379,7 +376,7 @@ def iniciar_login_hibrido(identificador: str, senha_plana: str) -> dict:
     try:
         user = db.execute(
             text("""
-                SELECT id, nome, email, senha_hash, telegram_username, telegram_id, primeiro_login, status_2fa
+                SELECT id, nome, email, senha_hash, telegram_username, telegram_id, telegram_chat_id, primeiro_login, status_2fa
                 FROM usuarios
                 WHERE lower(email) = :ident
                    OR lower(telegram_username) = :tg_com
@@ -395,10 +392,15 @@ def iniciar_login_hibrido(identificador: str, senha_plana: str) -> dict:
         if not user:
             return {"sucesso": False, "erro": "Usuário não encontrado com este E-mail ou @Telegram."}
 
-        if not check_password_hash(user.senha_hash, senha_plana):
+        hash_atual = user.senha_hash or ""
+        if hash_atual.startswith(("pbkdf2:", "scrypt:", "sha256")):
+            senha_ok = check_password_hash(hash_atual, senha_plana)
+        else:
+            senha_ok = (hash_atual == senha_plana)
+
+        if not senha_ok:
             return {"sucesso": False, "erro": "Senha incorreta."}
 
-        # Se primeiro_login == 1, exige validação 2FA por e-mail
         if user.primeiro_login is None or int(user.primeiro_login) == 1:
             codigo = f"{random.randint(100000, 999999)}"
             expira = datetime.utcnow() + timedelta(minutes=10)
@@ -418,6 +420,7 @@ def iniciar_login_hibrido(identificador: str, senha_plana: str) -> dict:
                 "identificador": user.email
             }
 
+        tg_id_final = user.telegram_id or user.telegram_chat_id or ""
         return {
             "sucesso": True,
             "requer_2fa": False,
@@ -427,7 +430,8 @@ def iniciar_login_hibrido(identificador: str, senha_plana: str) -> dict:
                 "email": user.email,
                 "telegram": user.telegram_username,
                 "telegram_username": user.telegram_username,
-                "telegram_id": user.telegram_id
+                "telegram_id": tg_id_final,
+                "telegram_chat_id": tg_id_final
             }
         }
     finally:
@@ -567,8 +571,276 @@ def redefinir_senha_com_token(token_ou_identificador: str, nova_senha: str, nova
 
 
 # =====================================================================
-# PERFIL DO USUÁRIO E INTEGRAÇÃO TELEGRAM (`usuarios`)
+# QR CODE + DUPLA AUTENTICAÇÃO (2FA) NO TELEGRAM E MOBILE
 # =====================================================================
+
+# Memória auxiliar rápida para vincular chat_id -> usuario_id durante o 2FA
+_PENDENCIAS_2FA_TELEGRAM = {}
+
+
+def gerar_token_mobile(usuario_id: int, minutos_validade: int = 10) -> dict:
+    """
+    Gera um token temporário para o QR Code sem apagar tokens de 2FA pendentes.
+    """
+    uid_real = garantir_usuario_sincronizado(usuario_id)
+    token = secrets.token_urlsafe(24)
+    expira_em = datetime.utcnow() + timedelta(minutes=minutos_validade)
+    db = SessionLocal()
+    try:
+        # Remove apenas tokens já expirados para não invalidar um QR Code recém-escaneado
+        db.query(TokenMobile).filter(
+            TokenMobile.expira_em < datetime.utcnow()
+        ).delete(synchronize_session=False)
+
+        novo_token = TokenMobile(
+            usuario_id=uid_real,
+            token=token,
+            expira_em=expira_em
+        )
+        db.add(novo_token)
+        db.commit()
+        return {"token": token, "validade_segundos": minutos_validade * 60}
+    except Exception as e:
+        db.rollback()
+        print(f"⚠️ Erro ao gerar token mobile: {e}")
+        return {"token": token, "validade_segundos": minutos_validade * 60}
+    finally:
+        db.close()
+
+
+def iniciar_2fa_leitura_qrcode(token: str, chat_id_telegram: str = None) -> dict:
+    """
+    Acionado quando o QR Code é lido (no Telegram ou no navegador do celular).
+    Salva um código de 6 dígitos em `usuarios.codigo_2fa` e registra a pendência para o chat_id.
+    """
+    token_limpo = (token or "").strip()
+    if not token_limpo:
+        return {"sucesso": False, "erro": "Token do QR Code ausente."}
+
+    agora = datetime.utcnow()
+    db = SessionLocal()
+    try:
+        reg = db.query(TokenMobile).filter(TokenMobile.token == token_limpo).first()
+        if not reg:
+            return {"sucesso": False, "erro": "QR Code inválido ou expirado. Gere um novo no painel web."}
+
+        dono = db.query(Usuario).filter(Usuario.id == reg.usuario_id).first()
+        if not dono:
+            return {"sucesso": False, "erro": "Usuário titular não encontrado."}
+
+        codigo_2fa = f"{random.randint(100000, 999999)}"
+        expira_2fa = agora + timedelta(minutes=10)
+        dono.codigo_2fa = codigo_2fa
+        dono.expiracao_2fa = expira_2fa
+
+        if chat_id_telegram:
+            chat_id_str = str(chat_id_telegram).strip()
+            _PENDENCIAS_2FA_TELEGRAM[chat_id_str] = dono.id
+
+            # Também grava um registro de pendência no banco
+            token_pendencia = f"2FA_TG:{chat_id_str}:{dono.id}"
+            db.query(TokenMobile).filter(
+                TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
+            ).delete(synchronize_session=False)
+            db.add(TokenMobile(usuario_id=dono.id, token=token_pendencia, expira_em=expira_2fa))
+
+        db.commit()
+        return {
+            "sucesso": True,
+            "usuario_id": dono.id,
+            "nome": dono.nome,
+            "email_destino": dono.email,
+            "email_mascarado": mascarar_email(dono.email),
+            "codigo_gerado": codigo_2fa
+        }
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": f"Erro ao iniciar 2FA do QR Code: {e}"}
+    finally:
+        db.close()
+
+
+def verificar_pendencia_2fa_telegram(chat_id: str) -> bool:
+    chat_id_str = str(chat_id).strip()
+    if chat_id_str in _PENDENCIAS_2FA_TELEGRAM:
+        return True
+    db = SessionLocal()
+    try:
+        reg = db.query(TokenMobile).filter(
+            TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
+        ).first()
+        return reg is not None
+    finally:
+        db.close()
+
+
+def confirmar_codigo_2fa_telegram(chat_id: str, codigo_digitado: str, username: str = "") -> dict:
+    """
+    Confirma os 6 dígitos enviados no chat do Telegram:
+    - Procura o usuário pela pendência do chat_id OU diretamente pelo `codigo_2fa` na tabela `usuarios`.
+    - Limpa duplicidades de `telegram_id` e `telegram_username` em outras linhas antes de salvar (evita erro 1062).
+    - Remove a pendência de 2FA para destravar o chat imediatamente.
+    """
+    chat_id_str = str(chat_id).strip()
+    codigo_limpo = re.sub(r"\D", "", str(codigo_digitado or ""))
+    user_arroba = normalizar_username_telegram(username)
+
+    if len(codigo_limpo) != 6:
+        return {"sucesso": False, "erro": "O código deve conter 6 dígitos numéricos."}
+
+    agora = datetime.utcnow()
+    db = SessionLocal()
+    try:
+        dono = None
+
+        # 1. Tenta localizar pelo usuário associado à pendência deste chat_id
+        uid_pendente = _PENDENCIAS_2FA_TELEGRAM.get(chat_id_str)
+        if not uid_pendente:
+            reg_pend = db.query(TokenMobile).filter(
+                TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
+            ).first()
+            if reg_pend:
+                uid_pendente = reg_pend.usuario_id
+
+        if uid_pendente:
+            dono = db.query(Usuario).filter(Usuario.id == int(uid_pendente)).first()
+
+        # 2. Fallback direto: busca qualquer usuário na tabela `usuarios` que esteja com este `codigo_2fa` ativo
+        if not dono or str(dono.codigo_2fa or "").strip() != codigo_limpo:
+            dono_por_codigo = db.query(Usuario).filter(Usuario.codigo_2fa == codigo_limpo).first()
+            if dono_por_codigo:
+                dono = dono_por_codigo
+
+        if not dono or not dono.codigo_2fa:
+            return {
+                "sucesso": False,
+                "erro": "❌ Nenhum código 2FA ativo encontrado. Gere e escaneie o QR Code novamente."
+            }
+
+        if str(dono.codigo_2fa).strip() != codigo_limpo:
+            return {
+                "sucesso": False,
+                "erro": "❌ Código de 6 dígitos incorreto! Confira o número mais recente enviado ao seu e-mail."
+            }
+
+        if dono.expiracao_2fa and dono.expiracao_2fa < agora:
+            dono.codigo_2fa = None
+            _PENDENCIAS_2FA_TELEGRAM.pop(chat_id_str, None)
+            db.query(TokenMobile).filter(
+                TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
+            ).delete(synchronize_session=False)
+            db.commit()
+            return {
+                "sucesso": False,
+                "erro": "⏰ Este código de 6 dígitos expirou. Escaneie o QR Code novamente."
+            }
+
+        # 3. Limpa `telegram_id`, `telegram_chat_id` e `telegram_username` de outras linhas para evitar IntegrityError (UNIQUE)
+        db.execute(
+            text("""
+                UPDATE usuarios
+                SET telegram_id = NULL, telegram_chat_id = NULL
+                WHERE id != :uid AND (telegram_id = :cid OR telegram_chat_id = :cid)
+            """),
+            {"uid": dono.id, "cid": chat_id_str}
+        )
+
+        if user_arroba:
+            db.execute(
+                text("""
+                    UPDATE usuarios
+                    SET telegram_username = NULL
+                    WHERE id != :uid
+                      AND (lower(telegram_username) = :u1 OR lower(telegram_username) = :u2)
+                """),
+                {"uid": dono.id, "u1": user_arroba.lower(), "u2": user_arroba.lstrip("@").lower()}
+            )
+
+        db.flush()
+
+        # 4. Vincula definitivamente a conta do titular ao Telegram atual e limpa a trava de 2FA
+        dono.telegram_id = chat_id_str
+        dono.telegram_chat_id = chat_id_str
+        if user_arroba:
+            dono.telegram_username = user_arroba
+        dono.codigo_2fa = None
+        dono.expiracao_2fa = None
+        dono.status_2fa = 1
+        dono.primeiro_login = 0
+        dono.atualizado_em = agora
+
+        _PENDENCIAS_2FA_TELEGRAM.pop(chat_id_str, None)
+        db.query(TokenMobile).filter(
+            TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
+        ).delete(synchronize_session=False)
+
+        db.commit()
+        return {
+            "sucesso": True,
+            "usuario": {
+                "id": dono.id,
+                "nome": dono.nome,
+                "email": dono.email,
+                "telegram_username": dono.telegram_username,
+                "telegram_id": chat_id_str
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"⚠️ Erro em confirmar_codigo_2fa_telegram: {e}")
+        return {"sucesso": False, "erro": f"Erro ao validar código 2FA: {e}"}
+    finally:
+        db.close()
+
+
+def validar_e_consumir_token_mobile(token: str, codigo_2fa: str = None) -> dict:
+    """Valida o código 2FA quando o QR Code é aberto pelo navegador do celular."""
+    token_limpo = (token or "").strip()
+    codigo_limpo = re.sub(r"\D", "", str(codigo_2fa or ""))
+
+    if not token_limpo:
+        return {"sucesso": False, "erro": "Token ausente."}
+    if len(codigo_limpo) != 6:
+        return {"sucesso": False, "erro": "Digite os 6 dígitos do código enviado ao seu e-mail."}
+
+    db = SessionLocal()
+    try:
+        reg = db.query(TokenMobile).filter(TokenMobile.token == token_limpo).first()
+        dono = None
+        if reg:
+            dono = db.query(Usuario).filter(Usuario.id == reg.usuario_id).first()
+        if not dono:
+            dono = db.query(Usuario).filter(Usuario.codigo_2fa == codigo_limpo).first()
+
+        if not dono or not dono.codigo_2fa:
+            return {"sucesso": False, "erro": "Sessão do QR Code expirada ou inválida. Gere um novo QR Code."}
+
+        if str(dono.codigo_2fa).strip() != codigo_limpo:
+            return {"sucesso": False, "erro": "Código de 6 dígitos incorreto."}
+
+        dono.codigo_2fa = None
+        dono.expiracao_2fa = None
+        dono.status_2fa = 1
+        dono.primeiro_login = 0
+        if reg:
+            db.delete(reg)
+        db.commit()
+
+        return {
+            "sucesso": True,
+            "usuario": {
+                "id": dono.id,
+                "nome": dono.nome,
+                "email": dono.email,
+                "telegram": dono.telegram_username
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": f"Erro ao validar 2FA mobile: {e}"}
+    finally:
+        db.close()
+
 
 def obter_ou_vincular_usuario_telegram(
     chat_id: str,
@@ -576,108 +848,74 @@ def obter_ou_vincular_usuario_telegram(
     first_name: str = "Usuário Telegram",
     token_vinculo: str = None
 ) -> dict:
+    """
+    Retorna o usuário vinculado ao `chat_id` atual.
+    Se o usuário já cadastrou seu `@telegram_username` ou `telegram_id` no painel Web,
+    reconhece a conta automaticamente.
+    """
     chat_id_str = str(chat_id).strip()
-    user_com_arroba = normalizar_username_telegram(username)
-    user_sem_arroba = user_com_arroba.lstrip("@")
+    user_arroba = normalizar_username_telegram(username)
+    user_sem_arroba = user_arroba.lstrip("@")
 
     db = SessionLocal()
     try:
-        # 1. Se veio token de vínculo do QR Code (/start <token>)
-        if token_vinculo:
-            reg_token = db.query(TokenMobile).filter(TokenMobile.token == token_vinculo).first()
-            if reg_token:
-                user_tok = db.query(Usuario).filter(Usuario.id == reg_token.usuario_id).first()
-                db.delete(reg_token)
-                if user_tok:
-                    user_tok.telegram_id = chat_id_str
-                    if user_com_arroba:
-                        user_tok.telegram_username = user_com_arroba
-                    db.commit()
-                    return {
-                        "id": user_tok.id,
-                        "nome": user_tok.nome,
-                        "email": user_tok.email,
-                        "telegram_username": user_tok.telegram_username,
-                        "telegram_id": chat_id_str,
-                        "vinculado_agora": True
-                    }
-
-        # 2. Procura pelo telegram_id já salvo na tabela `usuarios`
+        # 1. Busca pelo `telegram_id` ou `telegram_chat_id` já vinculado
         user = db.execute(
-            text("SELECT id, nome, email, telegram_username, telegram_id FROM usuarios WHERE telegram_id = :cid"),
+            text("""
+                SELECT id, nome, email, telegram_username, telegram_id, telegram_chat_id
+                FROM usuarios
+                WHERE telegram_id = :cid OR telegram_chat_id = :cid
+            """),
             {"cid": chat_id_str}
         ).fetchone()
 
         if user:
-            if user_com_arroba and user.telegram_username != user_com_arroba:
-                db.execute(
-                    text("UPDATE usuarios SET telegram_username = :tg WHERE id = :uid"),
-                    {"tg": user_com_arroba, "uid": user.id}
-                )
-                db.commit()
             return {
+                "autenticado": True,
                 "id": user.id,
                 "nome": user.nome,
                 "email": user.email,
-                "telegram_username": user.telegram_username or user_com_arroba,
-                "telegram_id": chat_id_str,
-                "vinculado_agora": False
+                "telegram_username": user.telegram_username or user_arroba,
+                "telegram_id": chat_id_str
             }
 
-        # 3. Procura pelo @telegram_username cadastrado na Web e grava o telegram_id automaticamente
-        if user_com_arroba:
-            user = db.execute(
+        # 2. Se não achou por ID, verifica se o @username do Telegram pertence a uma conta Web sem outro ID conflitante
+        if user_arroba:
+            user_por_nome = db.execute(
                 text("""
-                    SELECT id, nome, email, telegram_username
+                    SELECT id, nome, email, telegram_username, telegram_id, telegram_chat_id
                     FROM usuarios
-                    WHERE lower(telegram_username) = :tg_com
-                       OR lower(telegram_username) = :tg_sem
+                    WHERE lower(telegram_username) = :u1 OR lower(telegram_username) = :u2
                 """),
-                {"tg_com": user_com_arroba, "tg_sem": user_sem_arroba}
+                {"u1": user_arroba.lower(), "u2": user_sem_arroba.lower()}
             ).fetchone()
 
-            if user:
-                db.execute(
-                    text("""
-                        UPDATE usuarios
-                        SET telegram_id = :cid,
-                            telegram_username = :tg_com
-                        WHERE id = :uid
-                    """),
-                    {"cid": chat_id_str, "tg_com": user_com_arroba, "uid": user.id}
-                )
-                db.commit()
-                return {
-                    "id": user.id,
-                    "nome": user.nome,
-                    "email": user.email,
-                    "telegram_username": user_com_arroba,
-                    "telegram_id": chat_id_str,
-                    "vinculado_agora": True
-                }
+            if user_por_nome:
+                id_atual = str(user_por_nome.telegram_id or user_por_nome.telegram_chat_id or "").strip()
+                if not id_atual or id_atual == chat_id_str:
+                    db.execute(
+                        text("""
+                            UPDATE usuarios
+                            SET telegram_id = :cid, telegram_chat_id = :cid
+                            WHERE id = :uid
+                        """),
+                        {"cid": chat_id_str, "uid": user_por_nome.id}
+                    )
+                    db.commit()
+                    return {
+                        "autenticado": True,
+                        "id": user_por_nome.id,
+                        "nome": user_por_nome.nome,
+                        "email": user_por_nome.email,
+                        "telegram_username": user_arroba,
+                        "telegram_id": chat_id_str
+                    }
 
-        # 4. Fallback: cria usuário caso inicie conversa direto no Bot
-        email_temp = f"{chat_id_str}@telegram.local"
-        senha_hash = generate_password_hash(chat_id_str, method="pbkdf2:sha256")
-        novo = Usuario(
-            nome=first_name,
-            email=email_temp,
-            senha_hash=senha_hash,
-            telegram_username=user_com_arroba or None,
-            telegram_id=chat_id_str,
-            primeiro_login=0,
-            status_2fa=1
-        )
-        db.add(novo)
-        db.commit()
-        db.refresh(novo)
         return {
-            "id": novo.id,
-            "nome": novo.nome,
-            "email": novo.email,
-            "telegram_username": novo.telegram_username,
-            "telegram_id": chat_id_str,
-            "vinculado_agora": True
+            "autenticado": False,
+            "id": None,
+            "nome": first_name,
+            "email": ""
         }
     finally:
         db.close()
@@ -696,14 +934,15 @@ def obter_usuario_por_id(usuario_id: int) -> dict:
         user = db.query(Usuario).filter(Usuario.id == uid_real).first()
         if not user:
             return None
+        tg_id_final = user.telegram_id or user.telegram_chat_id or ""
         return {
             "id": user.id,
             "nome": user.nome,
             "email": user.email,
             "telegram": user.telegram_username or "",
             "telegram_username": user.telegram_username or "",
-            "telegram_id": user.telegram_id or "",
-            "telegram_chat_id": user.telegram_id or "",
+            "telegram_id": tg_id_final,
+            "telegram_chat_id": tg_id_final,
             "telefone_whatsapp": "",
             "numero_bot_whatsapp": "",
             "numero_bot_efetivo": os.getenv("WHATSAPP_BOT_NUMBER", ""),
@@ -730,12 +969,31 @@ def atualizar_configuracoes_usuario(
 
         if nome and nome.strip():
             user.nome = nome.strip()
-        if telegram_username is not None and str(telegram_username).strip():
-            user.telegram_username = normalizar_username_telegram(telegram_username)
-        if telegram_id is not None and str(telegram_id).strip():
-            user.telegram_id = str(telegram_id).strip()
 
+        if telegram_username is not None and str(telegram_username).strip():
+            tg_norm = normalizar_username_telegram(telegram_username)
+            db.execute(
+                text("UPDATE usuarios SET telegram_username = NULL WHERE id != :uid AND lower(telegram_username) = :tg"),
+                {"uid": uid_real, "tg": tg_norm.lower()}
+            )
+            user.telegram_username = tg_norm
+
+        if telegram_id is not None and str(telegram_id).strip():
+            tg_id_limpo = str(telegram_id).strip()
+            db.execute(
+                text("""
+                    UPDATE usuarios
+                    SET telegram_id = NULL, telegram_chat_id = NULL
+                    WHERE id != :uid AND (telegram_id = :cid OR telegram_chat_id = :cid)
+                """),
+                {"uid": uid_real, "cid": tg_id_limpo}
+            )
+            user.telegram_id = tg_id_limpo
+            user.telegram_chat_id = tg_id_limpo
+
+        user.atualizado_em = datetime.utcnow()
         db.commit()
+        tg_id_final = user.telegram_id or user.telegram_chat_id or ""
         return {
             "sucesso": True,
             "mensagem": "Configurações salvas com sucesso!",
@@ -744,8 +1002,8 @@ def atualizar_configuracoes_usuario(
                 "nome": user.nome,
                 "email": user.email,
                 "telegram_username": user.telegram_username or "",
-                "telegram_id": user.telegram_id or "",
-                "telegram_chat_id": user.telegram_id or ""
+                "telegram_id": tg_id_final,
+                "telegram_chat_id": tg_id_final
             }
         }
     except Exception as e:
@@ -756,61 +1014,8 @@ def atualizar_configuracoes_usuario(
 
 
 # =====================================================================
-# TOKENS MOBILE (`tokens_mobile`) E CHAT (`mensagens_chat` / `historico_mensagens`)
+# CHAT E HISTÓRICO (`mensagens_chat` / `historico_mensagens`)
 # =====================================================================
-
-def gerar_token_mobile(usuario_id: int, minutos_validade: int = 10) -> dict:
-    uid_real = garantir_usuario_sincronizado(usuario_id)
-    token = secrets.token_urlsafe(24)
-    expira_em = datetime.utcnow() + timedelta(minutes=minutos_validade)
-    db = SessionLocal()
-    try:
-        # Remove tokens antigos do usuário na tabela `tokens_mobile`
-        db.query(TokenMobile).filter(TokenMobile.usuario_id == uid_real).delete()
-
-        novo_token = TokenMobile(
-            usuario_id=uid_real,
-            token=token,
-            expira_em=expira_em
-        )
-        db.add(novo_token)
-        db.commit()
-        return {"token": token, "validade_segundos": minutos_validade * 60}
-    except Exception as e:
-        db.rollback()
-        print(f"⚠️ Erro ao gerar token mobile em tokens_mobile: {e}")
-        return {"token": token, "validade_segundos": minutos_validade * 60}
-    finally:
-        db.close()
-
-
-def validar_e_consumir_token_mobile(token: str) -> dict:
-    agora = datetime.utcnow()
-    db = SessionLocal()
-    try:
-        reg = db.query(TokenMobile).filter(TokenMobile.token == token).first()
-        if not reg:
-            return {"sucesso": False, "erro": "QR Code inválido ou já utilizado."}
-        if reg.expira_em and reg.expira_em < agora:
-            db.delete(reg)
-            db.commit()
-            return {"sucesso": False, "erro": "Este QR Code expirou. Gere um novo no painel."}
-
-        user = db.query(Usuario).filter(Usuario.id == reg.usuario_id).first()
-        db.delete(reg)
-        db.commit()
-        return {
-            "sucesso": True,
-            "usuario": {
-                "id": user.id,
-                "nome": user.nome,
-                "email": user.email,
-                "telegram": user.telegram_username
-            }
-        }
-    finally:
-        db.close()
-
 
 def _obter_ou_criar_conversa_ativa(db, usuario_id: int) -> int:
     conv = (
@@ -836,7 +1041,6 @@ def salvar_mensagem_historico(usuario_id: int, remetente: str, mensagem: str):
         rem = "usuario" if remetente in ("usuario", "user") else "ia"
         conversa_id = _obter_ou_criar_conversa_ativa(db, uid_real)
 
-        # 1. Salva na tabela `mensagens_chat`
         nova_msg = MensagemChat(
             conversa_id=conversa_id,
             usuario_id=uid_real,
@@ -845,7 +1049,6 @@ def salvar_mensagem_historico(usuario_id: int, remetente: str, mensagem: str):
         )
         db.add(nova_msg)
 
-        # 2. Mantém `historico_mensagens` (par pergunta/resposta) sincronizado
         if rem == "usuario":
             hist = HistoricoMensagem(usuario_id=uid_real, mensagem=str(mensagem), resposta=None)
             db.add(hist)
@@ -892,7 +1095,6 @@ def listar_historico_mensagens(usuario_id: int, limite: int = 50) -> list:
                 for m in msgs
             ]
 
-        # Fallback caso existam registros apenas em `historico_mensagens`
         hists = (
             db.query(HistoricoMensagem)
             .filter(HistoricoMensagem.usuario_id == uid_real)
@@ -912,8 +1114,23 @@ def listar_historico_mensagens(usuario_id: int, limite: int = 50) -> list:
         db.close()
 
 
+def limpar_historico_conversa(usuario_id: int) -> dict:
+    uid_real = garantir_usuario_sincronizado(usuario_id)
+    db = SessionLocal()
+    try:
+        db.query(MensagemChat).filter(MensagemChat.usuario_id == uid_real).delete()
+        db.query(HistoricoMensagem).filter(HistoricoMensagem.usuario_id == uid_real).delete()
+        db.commit()
+        return {"sucesso": True}
+    except Exception as e:
+        db.rollback()
+        return {"sucesso": False, "erro": str(e)}
+    finally:
+        db.close()
+
+
 # =====================================================================
-# TRANSAÇÕES (`transacoes`), RECEITAS FIXAS (`receitas_fixas`) E DESPESAS FIXAS (`despesas_fixas`)
+# TRANSAÇÕES, RENDAS FIXAS, GASTOS FIXOS E TETOS DE GASTOS
 # =====================================================================
 
 def registrar_transacao(
@@ -1020,7 +1237,6 @@ def criar_renda_fixa(
     dia_recebimento: int = None,
     ativo: bool = None
 ) -> dict:
-    """Salva na tabela `receitas_fixas` aceitando parâmetros tanto do ia.py quanto do main.py."""
     uid_real = garantir_usuario_sincronizado(usuario_id)
     desc_final = (description if description is not None else descricao) or "Renda Fixa"
     val_final = amount if amount is not None else (valor if valor is not None else 0.0)
@@ -1047,28 +1263,7 @@ def criar_renda_fixa(
         db.close()
 
 
-def adicionar_renda_fixa(
-    usuario_id: int,
-    description: str = None,
-    amount: float = None,
-    day_of_month: int = None,
-    is_active: bool = True,
-    descricao: str = None,
-    valor: float = None,
-    dia_recebimento: int = None,
-    ativo: bool = None
-) -> dict:
-    return criar_renda_fixa(
-        usuario_id=usuario_id,
-        description=description,
-        amount=amount,
-        day_of_month=day_of_month,
-        is_active=is_active,
-        descricao=descricao,
-        valor=valor,
-        dia_recebimento=dia_recebimento,
-        ativo=ativo
-    )
+adicionar_renda_fixa = criar_renda_fixa
 
 
 def atualizar_renda_fixa(
@@ -1164,7 +1359,6 @@ def criar_gasto_fixo(
     dia_vencimento: int = None,
     ativo: bool = None
 ) -> dict:
-    """Salva na tabela `despesas_fixas` aceitando parâmetros tanto do ia.py quanto do main.py."""
     uid_real = garantir_usuario_sincronizado(usuario_id)
     desc_final = (description if description is not None else descricao) or "Despesa Fixa"
     val_final = amount if amount is not None else (valor if valor is not None else 0.0)
@@ -1192,30 +1386,7 @@ def criar_gasto_fixo(
         db.close()
 
 
-def adicionar_gasto_fixo(
-    usuario_id: int,
-    description: str = None,
-    amount: float = None,
-    due_day: int = None,
-    is_active: bool = True,
-    categoria: str = "Fixas",
-    descricao: str = None,
-    valor: float = None,
-    dia_vencimento: int = None,
-    ativo: bool = None
-) -> dict:
-    return criar_gasto_fixo(
-        usuario_id=usuario_id,
-        description=description,
-        amount=amount,
-        due_day=due_day,
-        is_active=is_active,
-        categoria=categoria,
-        descricao=descricao,
-        valor=valor,
-        dia_vencimento=dia_vencimento,
-        ativo=ativo
-    )
+adicionar_gasto_fixo = criar_gasto_fixo
 
 
 def atualizar_gasto_fixo(
@@ -1304,230 +1475,104 @@ def remover_gasto_fixo(usuario_id: int, gasto_id: int) -> dict:
         db.close()
 
 
-# def obter_resumo_financeiro(usuario_id: int, periodo: str = "mes_atual") -> dict:
-#     uid_real = garantir_usuario_sincronizado(usuario_id)
-#     db = SessionLocal()
-#     try:
-#         receitas_var = (
-#             db.query(func.coalesce(func.sum(Transacao.valor), 0.0))
-#             .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "receita")
-#             .scalar() or 0.0
-#         )
-#         despesas_var = (
-#             db.query(func.coalesce(func.sum(Transacao.valor), 0.0))
-#             .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "despesa")
-#             .scalar() or 0.0
-#         )
-#         rendas_fixas = (
-#             db.query(func.coalesce(func.sum(ReceitaFixa.valor), 0.0))
-#             .filter(ReceitaFixa.usuario_id == uid_real, ReceitaFixa.ativo == 1)
-#             .scalar() or 0.0
-#         )
-#         gastos_fixos = (
-#             db.query(func.coalesce(func.sum(DespesaFixa.valor), 0.0))
-#             .filter(DespesaFixa.usuario_id == uid_real, DespesaFixa.ativo == 1)
-#             .scalar() or 0.0
-#         )
-#         total_lancamentos = (
-#             db.query(func.count(Transacao.id))
-#             .filter(Transacao.usuario_id == uid_real)
-#             .scalar() or 0
-#         )
+def salvar_teto_gasto(usuario_id: int, categoria: str, valor_teto: float) -> dict:
+    uid_real = garantir_usuario_sincronizado(usuario_id)
+    cat_limpa = (categoria or "").strip()
+    if not cat_limpa or float(valor_teto) <= 0:
+        return {"sucesso": False, "erro": "Informe uma categoria válida e valor maior que zero."}
 
-#         cats = (
-#             db.query(Transacao.categoria, func.sum(Transacao.valor).label("total"))
-#             .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "despesa")
-#             .group_by(Transacao.categoria)
-#             .order_by(func.sum(Transacao.valor).desc())
-#             .all()
-#         )
-#         por_categoria = [{"categoria": c[0] or "Outros", "total": float(c[1] or 0.0)} for c in cats]
-
-#         total_entradas = float(receitas_var) + float(rendas_fixas)
-#         total_saidas = float(despesas_var) + float(gastos_fixos)
-
-#         labels_pizza = [c["categoria"] for c in por_categoria]
-#         valores_pizza = [c["total"] for c in por_categoria]
-#         if float(gastos_fixos) > 0:
-#             labels_pizza.append("Despesas Fixas")
-#             valores_pizza.append(float(gastos_fixos))
-
-#         return {
-#             "mes_referencia": datetime.utcnow().strftime("%m/%Y"),
-#             "total_receitas": total_entradas,
-#             "total_despesas": total_saidas,
-#             "receitas_variaveis": float(receitas_var),
-#             "despesas_variaveis": float(despesas_var),
-#             "rendas_fixas": float(rendas_fixas),
-#             "total_rendas_fixas": float(rendas_fixas),
-#             "gastos_fixos": float(gastos_fixos),
-#             "total_gastos_fixos": float(gastos_fixos),
-#             "saldo": total_entradas - total_saidas,
-#             "total_lancamentos": int(total_lancamentos),
-#             "despesas_por_categoria": por_categoria,
-#             "grafico_pizza": {
-#                 "labels": labels_pizza,
-#                 "valores": valores_pizza
-#             },
-#             "grafico_colunas": {
-#                 "labels": ["Mês Vigente"],
-#                 "entradas": [total_entradas],
-#                 "saidas": [total_saidas]
-#             }
-#         }
-#     finally:
-#         db.close()
-
-def inicializar_tabela_tetos():
-    """Cria a tabela tetos_gastos com sintaxe compatível com MySQL Workbench."""
     db = SessionLocal()
     try:
-        db.execute(text("""
-            CREATE TABLE IF NOT EXISTS tetos_gastos (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                usuario_id INT NOT NULL,
-                categoria VARCHAR(100) NOT NULL,
-                valor_teto DECIMAL(10,2) NOT NULL,
-                atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY uq_usuario_categoria (usuario_id, categoria),
-                CONSTRAINT fk_limites_orcamento_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-        """))
-        db.commit()
-    except Exception:
-        db.rollback()
-    finally:
-        db.close()
-
-# Garante a criação da tabela ao iniciar o módulo
-inicializar_tabela_tetos()
-
-
-def definir_teto_gasto(usuario_id: int, categoria: str, valor_teto: float) -> dict:
-    """Define ou atualiza o teto de gastos mensal para uma categoria ou item específico."""
-    inicializar_tabela_tetos()
-    db = SessionLocal()
-    try:
-        cat_limpa = (categoria or "Outros").strip().capitalize()
-        val = float(valor_teto)
-        if val <= 0:
-            return {"sucesso": False, "erro": "O valor do teto deve ser maior que zero."}
-
-        existente = db.execute(
-            text("SELECT id FROM tetos_gastos WHERE usuario_id = :uid AND LOWER(categoria) = LOWER(:cat)"),
-            {"uid": int(usuario_id), "cat": cat_limpa}
-        ).fetchone()
-
+        existente = (
+            db.query(TetoGasto)
+            .filter(TetoGasto.usuario_id == uid_real, func.lower(TetoGasto.categoria) == cat_limpa.lower())
+            .first()
+        )
         if existente:
-            db.execute(
-                text("UPDATE tetos_gastos SET valor_teto = :val, atualizado_em = CURRENT_TIMESTAMP WHERE id = :id"),
-                {"val": val, "id": existente[0]}
-            )
+            existente.valor_teto = round(float(valor_teto), 2)
+            existente.atualizado_em = datetime.utcnow()
         else:
-            db.execute(
-                text("INSERT INTO tetos_gastos (usuario_id, categoria, valor_teto) VALUES (:uid, :cat, :val)"),
-                {"uid": int(usuario_id), "cat": cat_limpa, "val": val}
+            novo = TetoGasto(
+                usuario_id=uid_real,
+                categoria=cat_limpa,
+                valor_teto=round(float(valor_teto), 2)
             )
+            db.add(novo)
         db.commit()
-        return {"sucesso": True, "categoria": cat_limpa, "valor_teto": val}
+        return {"sucesso": True}
     except Exception as e:
         db.rollback()
-        return {"sucesso": False, "erro": f"Erro ao salvar teto de gastos: {str(e)}"}
+        return {"sucesso": False, "erro": f"Erro ao salvar teto de gastos: {e}"}
     finally:
         db.close()
-
-
-def _normalizar_texto_teto(texto: str) -> str:
-    if not texto:
-        return ""
-    return "".join(
-        c for c in unicodedata.normalize("NFD", str(texto).lower().strip())
-        if unicodedata.category(c) != "Mn"
-    )
 
 
 def listar_tetos_gastos(usuario_id: int) -> list:
-    """Retorna todos os tetos configurados pelo usuário cruzando por categoria ou descrição do item."""
-    inicializar_tabela_tetos()
+    uid_real = garantir_usuario_sincronizado(usuario_id)
     db = SessionLocal()
     try:
-        tetos_rows = db.execute(
-            text("""
-                SELECT id, categoria, valor_teto
-                FROM tetos_gastos
-                WHERE usuario_id = :uid
-                ORDER BY categoria ASC
-            """),
-            {"uid": int(usuario_id)}
-        ).fetchall()
-
-        despesas_rows = db.execute(
-            text("""
-                SELECT categoria, descricao, COALESCE(valor, 0) AS valor
-                FROM transacoes
-                WHERE usuario_id = :uid AND tipo = 'despesa'
-            """),
-            {"uid": int(usuario_id)}
-        ).fetchall()
+        tetos = db.query(TetoGasto).filter(TetoGasto.usuario_id == uid_real).order_by(TetoGasto.categoria.asc()).all()
+        transacoes_despesa = (
+            db.query(Transacao)
+            .filter(Transacao.usuario_id == uid_real, Transacao.tipo == "despesa")
+            .all()
+        )
+        fixas_ativas = (
+            db.query(DespesaFixa)
+            .filter(DespesaFixa.usuario_id == uid_real, DespesaFixa.ativo == 1)
+            .all()
+        )
 
         resultado = []
-        for row in tetos_rows:
-            row_id = row[0]
-            row_cat = row[1]
-            row_val_teto = float(row[2] or 0.0)
-
-            alvo_norm = _normalizar_texto_teto(row_cat)
-            gasto_atual = 0.0
-
-            for desp in despesas_rows:
-                cat_norm = _normalizar_texto_teto(desp[0] or "Outros")
-                desc_norm = _normalizar_texto_teto(desp[1] or "")
-                val_desp = float(desp[2] or 0.0)
-
-                if cat_norm == alvo_norm or (alvo_norm and alvo_norm in desc_norm):
-                    gasto_atual += val_desp
-
-            gasto_atual = round(gasto_atual, 2)
-            percentual = round((gasto_atual / row_val_teto) * 100, 1) if row_val_teto > 0 else 0.0
-
+        for t in tetos:
+            alvo = (t.categoria or "").strip().lower()
+            gasto_var = sum(
+                float(tr.valor or 0.0)
+                for tr in transacoes_despesa
+                if (tr.categoria or "").strip().lower() == alvo or alvo in (tr.descricao or "").strip().lower()
+            )
+            gasto_fix = sum(
+                float(fx.valor or 0.0)
+                for fx in fixas_ativas
+                if (fx.categoria or "").strip().lower() == alvo or alvo in (fx.descricao or "").strip().lower()
+            )
+            gasto_atual = round(gasto_var + gasto_fix, 2)
+            val_teto = float(t.valor_teto or 0.0)
+            perc = round((gasto_atual / val_teto) * 100, 1) if val_teto > 0 else 0.0
             resultado.append({
-                "id": row_id,
-                "categoria": row_cat,
-                "valor_teto": row_val_teto,
+                "id": t.id,
+                "categoria": t.categoria,
+                "valor_teto": val_teto,
                 "gasto_atual": gasto_atual,
-                "disponivel": round(max(0.0, row_val_teto - gasto_atual), 2),
-                "excedente": round(max(0.0, gasto_atual - row_val_teto), 2),
-                "percentual": percentual,
-                "em_alerta": 80.0 <= percentual <= 100.0,
-                "estourou": gasto_atual > row_val_teto
+                "disponivel": max(0.0, round(val_teto - gasto_atual, 2)),
+                "percentual": perc,
+                "estourou": gasto_atual > val_teto
             })
         return resultado
     finally:
         db.close()
 
 
-def excluir_teto_gasto(usuario_id: int, categoria_ou_id) -> dict:
-    """Remove um teto de gasto por ID ou pelo nome da categoria/item."""
-    inicializar_tabela_tetos()
+def excluir_teto_gasto(usuario_id: int, categoria: str) -> dict:
+    uid_real = garantir_usuario_sincronizado(usuario_id)
+    cat_limpa = (categoria or "").strip().lower()
     db = SessionLocal()
     try:
-        if str(categoria_ou_id).isdigit():
-            db.execute(
-                text("DELETE FROM tetos_gastos WHERE id = :id AND usuario_id = :uid"),
-                {"id": int(categoria_ou_id), "uid": int(usuario_id)}
-            )
-        else:
-            db.execute(
-                text("DELETE FROM tetos_gastos WHERE LOWER(categoria) = LOWER(:cat) AND usuario_id = :uid"),
-                {"cat": str(categoria_ou_id).strip(), "uid": int(usuario_id)}
-            )
+        item = (
+            db.query(TetoGasto)
+            .filter(TetoGasto.usuario_id == uid_real, func.lower(TetoGasto.categoria) == cat_limpa)
+            .first()
+        )
+        if not item:
+            return {"sucesso": False, "erro": "Teto não encontrado."}
+        db.delete(item)
         db.commit()
         return {"sucesso": True}
-    except Exception as e:
-        db.rollback()
-        return {"sucesso": False, "erro": str(e)}
     finally:
         db.close()
 
+
+# Caminho: core/database.py (Substitua a função obter_resumo_financeiro inteira)
 
 def obter_resumo_financeiro(usuario_id: int, periodo: str = "mes_atual") -> dict:
     """

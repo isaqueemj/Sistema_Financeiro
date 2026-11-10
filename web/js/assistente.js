@@ -88,16 +88,18 @@ function adicionarBalaoMensagem(remetente, textoHTML, graficos = null) {
     container.scrollTop = container.scrollHeight;
 
     if (graficos) {
-        renderizarGraficosNoBalao(idGraficoUnico, graficos);
+        // Um pequeno delay para garantir que o DOM renderizou o Canvas antes de instanciar o Chart.js
+        setTimeout(() => {
+            renderizarGraficosNoBalao(idGraficoUnico, graficos);
+        }, 50);
     }
 }
 
-// Converte labels como "#36" e "#39" para o nome real de onde foi gasto (ex: "Mercado", "Uber")
+// Caminho: web/js/assistente.js (Substitua as funções resolverDadosEvolucaoComNomes, renderizarGraficosNoBalao e enviarMensagemAoBot)
+
 function resolverDadosEvolucaoComNomes(evolucao) {
     const labelsOriginais = evolucao?.labels || ["Hoje"];
     const saldos = (evolucao?.saldos || [0]).map(Number);
-
-    // Ordena transações do cache da mais antiga para a mais recente como fallback posicional
     const transacoesOrdenadas = [...listaTransacoesCache].sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
 
     const labelsNomes = [];
@@ -112,7 +114,6 @@ function resolverDadosEvolucaoComNomes(evolucao) {
         if (matchId) {
             transacao = mapaTransacoesPorId[matchId[1]] || mapaTransacoesPorId[`#${matchId[1]}`];
         }
-        // Fallback: se não achou pelo ID mas há transações na mesma posição após a "Base Fixa"
         if (!transacao && idx > 0 && transacoesOrdenadas[idx - 1] && strLbl.startsWith("#")) {
             transacao = transacoesOrdenadas[idx - 1];
         }
@@ -123,7 +124,6 @@ function resolverDadosEvolucaoComNomes(evolucao) {
             const valor = Number(transacao.valor || 0);
             const ehReceita = transacao.tipo === "receita";
 
-            // Nome curto no eixo X para não embolar (ex: "Mercado")
             const nomeCurto = nomeGasto.length > 14 ? nomeGasto.slice(0, 12) + "…" : nomeGasto;
             labelsNomes.push(nomeCurto);
 
@@ -133,7 +133,6 @@ function resolverDadosEvolucaoComNomes(evolucao) {
             });
             coresPontos.push(ehReceita ? "#10b981" : "#ef4444");
         } else {
-            // Caso seja "Base Fixa" ou data
             labelsNomes.push(strLbl);
             const variacao = idx > 0 ? saldos[idx] - saldos[idx - 1] : 0;
             detalhesTooltip.push({
@@ -150,15 +149,22 @@ function resolverDadosEvolucaoComNomes(evolucao) {
 }
 
 function renderizarGraficosNoBalao(prefixoId, graficos) {
-    // 1. Gráfico de Pizza (Gastos por Categoria)
+    if (!graficos || typeof Chart === "undefined") return;
+
+    // Busca pela nomenclatura antiga (.pizza) ou pela nova usada no obter_resumo_financeiro (.grafico_pizza)
+    const dPizza = graficos.grafico_pizza || graficos.pizza || {};
+    const dColunas = graficos.grafico_colunas || graficos.colunas || graficos.barras || {};
+    const dEvolucao = graficos.grafico_evolucao || graficos.evolucao || {};
+
+    // 1. Gráfico de Pizza
     const ctxPizza = document.getElementById(`${prefixoId}-pizza`);
     if (ctxPizza) {
         new Chart(ctxPizza, {
             type: "doughnut",
             data: {
-                labels: graficos.pizza?.labels?.length ? graficos.pizza.labels : ["Sem gastos"],
+                labels: dPizza.labels?.length ? dPizza.labels : ["Sem gastos"],
                 datasets: [{
-                    data: graficos.pizza?.valores?.length ? graficos.pizza.valores : [1],
+                    data: dPizza.valores?.length ? dPizza.valores : [1],
                     backgroundColor: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
                 }]
             },
@@ -177,7 +183,7 @@ function renderizarGraficosNoBalao(prefixoId, graficos) {
         });
     }
 
-    // 2. Gráfico de Barras (Entradas vs Saídas)
+    // 2. Gráfico de Barras
     const ctxBarras = document.getElementById(`${prefixoId}-barras`);
     if (ctxBarras) {
         new Chart(ctxBarras, {
@@ -186,7 +192,7 @@ function renderizarGraficosNoBalao(prefixoId, graficos) {
                 labels: ["Entradas", "Saídas"],
                 datasets: [{
                     label: "R$",
-                    data: [graficos.colunas?.entradas?.[0] || 0, graficos.colunas?.saidas?.[0] || 0],
+                    data: [dColunas.entradas?.[0] || 0, dColunas.saidas?.[0] || 0],
                     backgroundColor: ["#10b981", "#ef4444"],
                     borderRadius: 6
                 }]
@@ -194,26 +200,25 @@ function renderizarGraficosNoBalao(prefixoId, graficos) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => ` ${formatarMoeda(ctx.parsed.y)}`
-                        }
-                    }
-                },
+                plugins: { legend: { display: false } },
                 scales: {
-                    x: { ticks: { color: "#cbd5e1" } },
-                    y: { ticks: { color: "#cbd5e1" } }
+                    x: { ticks: { color: "#cbd5e1" }, grid: { display: false } },
+                    y: { 
+                        ticks: { 
+                            color: "#cbd5e1",
+                            callback: function(value) { return "R$ " + Number(value).toLocaleString("pt-BR"); }
+                        }, 
+                        grid: { color: "rgba(148, 163, 184, 0.1)" } 
+                    }
                 }
             }
         });
     }
 
-    // 3. Gráfico de Linha (Evolução do Saldo com o Nome de Onde Foi Gasto)
+    // 3. Gráfico de Linha (Evolução Forçada a Categoria no Eixo X para Expandir Horizontalmente)
     const ctxLinha = document.getElementById(`${prefixoId}-linha`);
     if (ctxLinha) {
-        const { labelsNomes, saldos, detalhesTooltip, coresPontos } = resolverDadosEvolucaoComNomes(graficos.evolucao);
+        const { labelsNomes, saldos, detalhesTooltip, coresPontos } = resolverDadosEvolucaoComNomes(dEvolucao);
 
         new Chart(ctxLinha, {
             type: "line",
@@ -238,7 +243,7 @@ function renderizarGraficosNoBalao(prefixoId, graficos) {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { labels: { color: "#f8fafc", font: { size: 10 } } },
+                    legend: { display: false },
                     tooltip: {
                         callbacks: {
                             title: function(context) {
@@ -257,18 +262,28 @@ function renderizarGraficosNoBalao(prefixoId, graficos) {
                 },
                 scales: {
                     x: {
+                        type: 'category', // Trata strings sem colapsar os pontos
                         ticks: {
                             color: "#cbd5e1",
                             font: { size: 10 },
                             maxRotation: 25,
-                            minRotation: 0
-                        }
+                            minRotation: 0,
+                            callback: function(value) {
+                                const labelText = this.getLabelForValue(value);
+                                return labelText.length > 10 ? labelText.substring(0, 8) + "..." : labelText;
+                            }
+                        },
+                        grid: { color: "rgba(148, 163, 184, 0.08)" }
                     },
                     y: {
                         ticks: {
                             color: "#cbd5e1",
-                            font: { size: 10 }
-                        }
+                            font: { size: 10 },
+                            callback: function(value) {
+                                return "R$ " + Number(value).toLocaleString("pt-BR");
+                            }
+                        },
+                        grid: { color: "rgba(148, 163, 184, 0.1)" }
                     }
                 }
             }
@@ -287,14 +302,22 @@ async function enviarMensagemAoBot(mensagem) {
         });
         const data = await res.json();
 
-        // Atualiza os dados e o mapa de nomes das transações ANTES de desenhar os gráficos
+        // Limpa cache antigo e atualiza a base de transações antes de desenhar 
         await carregarDadosUsuarioESaldo();
 
         const textoBot = formatarMarkdownParaHTML(data.resposta || "Comando processado.");
-        const graficosChat = data.exibir_graficos_web ? data.graficos : null;
+        
+        // Puxa o objeto do novo `database.py` (dentro de "resumo" em vez de "graficos")
+        let graficosChat = null;
+        if (data.enviar_grafico || data.exibir_graficos || data.exibir_graficos_web || data.intencao === "enviar_grafico") {
+            graficosChat = data.resumo || data.graficos || null;
+        }
 
         adicionarBalaoMensagem("bot", textoBot, graficosChat);
-        localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
+        
+        if (data.transacao_registrada) {
+            localStorage.setItem("ultima_atualizacao_financeira", Date.now().toString());
+        }
     } catch (err) {
         adicionarBalaoMensagem("bot", "⚠️ Erro de comunicação com o servidor.");
     }
@@ -307,7 +330,6 @@ async function carregarDadosUsuarioESaldo() {
         const data = await res.json();
         if (!data.sucesso) return;
 
-        // Guarda todas as transações em cache para trocar "#36" pelo nome real (ex: "Mercado")
         listaTransacoesCache = Array.isArray(data.transacoes) ? data.transacoes : [];
         mapaTransacoesPorId = {};
         listaTransacoesCache.forEach((t) => {

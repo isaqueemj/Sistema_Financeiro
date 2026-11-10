@@ -44,13 +44,15 @@ from core.database import (
     listar_gastos_fixos,
     remover_gasto_fixo,
     obter_resumo_financeiro,
-    definir_teto_gasto, 
+    salvar_teto_gasto, 
     listar_tetos_gastos, 
     excluir_teto_gasto
 )
 from core.ia import interpretar_mensagem_financeira
 from core.email_service import enviar_email_codigo_2fa, enviar_email_recuperacao_senha
-from core.telegram_bot import iniciar_bot_telegram_background, obter_username_bot, processar_update_telegram
+from core.telegram_bot import iniciar_bot_telegram_background, obter_username_bot, processar_update_telegram, enviar_mensagem_telegram
+
+from werkzeug.security import check_password_hash, generate_password_hash
 
 load_dotenv()
 
@@ -425,39 +427,159 @@ def api_gerar_qrcode():
     }), 200
 
 
-@app.route("/api/auth/mobile-login", methods=["GET"])
+@app.route("/api/auth/mobile-login", methods=["GET", "POST"])
 def api_mobile_login():
-    token = request.args.get("token", "")
-    resultado = validar_e_consumir_token_mobile(token)
+    """
+    Quando o QR Code é lido pela câmera do celular:
+    - GET: Gera e envia automaticamente o código 2FA de 6 dígitos para o e-mail cadastrado e exibe os 6 campos OTP.
+    - POST: Valida o código 2FA de 6 dígitos, consome o token e abre a sessão no celular.
+    """
+    token = (request.args.get("token") or request.form.get("token") or "").strip()
 
-    if not resultado.get("sucesso"):
-        html_erro = f"""
+    if request.method == "GET":
+        inicio = iniciar_2fa_leitura_qrcode(token=token)
+        if not inicio.get("sucesso"):
+            html_erro = f"""
+            <!DOCTYPE html>
+            <html lang="pt-BR">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>QR Code Inválido - FinanceControl</title>
+                <style>
+                    body {{ background:#0b1320; color:#f8fafc; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:20px; text-align:center; }}
+                    .box {{ background:#152238; padding:28px; border-radius:14px; max-width:400px; width:100%; border:1px solid #ef4444; }}
+                    a {{ display:inline-block; margin-top:16px; padding:10px 20px; background:#3b82f6; color:#fff; text-decoration:none; border-radius:8px; font-weight:600; }}
+                </style>
+            </head>
+            <body>
+                <div class="box">
+                    <h2>⚠️ QR Code Inválido ou Expirado</h2>
+                    <p style="color:#cbd5e1; margin-top:8px;">{inicio.get('erro')}</p>
+                    <a href="/">Ir para o Login</a>
+                </div>
+            </body>
+            </html>
+            """
+            return Response(html_erro, status=400, mimetype="text/html")
+
+        # Dispara o código de 6 dígitos para o e-mail do titular da conta
+        enviar_email_codigo_2fa(
+            destinatario=inicio["email_destino"],
+            nome=inicio["nome"],
+            codigo=inicio["codigo_gerado"]
+        )
+
+        html_2fa = f"""
         <!DOCTYPE html>
         <html lang="pt-BR">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>QR Code Inválido - FinanceControl</title>
+            <title>Verificação 2FA - FinanceControl</title>
             <style>
-                body {{ background:#0f172a; color:#f8fafc; font-family:sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; padding:20px; text-align:center; }}
-                .box {{ background:#1e293b; padding:30px; border-radius:12px; max-width:380px; border:1px solid #ef4444; }}
-                a {{ display:inline-block; margin-top:15px; padding:10px 20px; background:#3b82f6; color:#fff; text-decoration:none; border-radius:8px; font-weight:bold; }}
+                * {{ box-sizing: border-box; }}
+                body {{ background:#0b1320; color:#f8fafc; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:20px; }}
+                .box {{ background:#152238; padding:28px; border-radius:16px; max-width:420px; width:100%; border:1px solid #3b82f6; box-shadow:0 10px 30px rgba(0,0,0,0.5); text-align:center; }}
+                .badge {{ display:inline-block; background:rgba(59,130,246,0.18); color:#60a5fa; padding:5px 12px; border-radius:999px; font-size:0.78rem; font-weight:700; margin-bottom:12px; }}
+                h2 {{ margin:0 0 8px; font-size:1.35rem; }}
+                p {{ color:#94a3b8; font-size:0.9rem; line-height:1.45; margin-bottom:20px; }}
+                .otp-row {{ display:flex; gap:8px; justify-content:center; margin-bottom:20px; }}
+                .otp-box {{ width:46px; height:54px; text-align:center; font-size:1.35rem; font-weight:700; border-radius:10px; border:1px solid #334155; background:#0f172a; color:#fff; }}
+                .otp-box:focus {{ outline:none; border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.25); }}
+                button {{ width:100%; padding:13px; background:linear-gradient(135deg,#10b981,#059669); color:#fff; border:none; border-radius:10px; font-size:0.95rem; font-weight:700; cursor:pointer; }}
             </style>
         </head>
         <body>
             <div class="box">
-                <h2>⚠️ Link Expirado ou Utilizado</h2>
-                <p>{resultado.get('erro')}</p>
-                <a href="/">Ir para Login</a>
+                <span class="badge">🔐 Dupla Autenticação (2FA)</span>
+                <h2>Confirme seu Acesso Mobile</h2>
+                <p>Enviamos um código de 6 dígitos para o e-mail <strong>{inicio['email_mascarado']}</strong>. Digite-o abaixo para liberar o acesso:</p>
+                <form method="POST" action="/api/auth/mobile-login" id="form-qr-2fa">
+                    <input type="hidden" name="token" value="{token}">
+                    <input type="hidden" name="codigo" id="codigo-final">
+                    <div class="otp-row">
+                        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" required autofocus>
+                        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" required>
+                        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" required>
+                        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" required>
+                        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" required>
+                        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" required>
+                    </div>
+                    <button type="submit">VERIFICAR E ACESSAR</button>
+                </form>
+            </div>
+            <script>
+                const inputs = Array.from(document.querySelectorAll('.otp-box'));
+                const hiddenCodigo = document.getElementById('codigo-final');
+                const form = document.getElementById('form-qr-2fa');
+
+                function atualizarHidden() {{
+                    hiddenCodigo.value = inputs.map(i => i.value).join('');
+                }}
+
+                inputs.forEach((inp, idx) => {{
+                    inp.addEventListener('input', (e) => {{
+                        const nums = e.target.value.replace(/\\D/g, '');
+                        if (nums.length > 1) {{
+                            nums.slice(0, 6).split('').forEach((c, i) => {{ if (inputs[i]) inputs[i].value = c; }});
+                            atualizarHidden();
+                            inputs[Math.min(nums.length, 5)].focus();
+                            return;
+                        }}
+                        e.target.value = nums;
+                        atualizarHidden();
+                        if (nums && idx < 5) inputs[idx + 1].focus();
+                    }});
+                    inp.addEventListener('keydown', (e) => {{
+                        if (e.key === 'Backspace' && !inp.value && idx > 0) inputs[idx - 1].focus();
+                    }});
+                    inp.addEventListener('paste', (e) => {{
+                        e.preventDefault();
+                        const colado = (e.clipboardData || window.clipboardData).getData('text').replace(/\\D/g, '').slice(0, 6);
+                        colado.split('').forEach((c, i) => {{ if (inputs[i]) inputs[i].value = c; }});
+                        atualizarHidden();
+                    }});
+                }});
+
+                form.addEventListener('submit', () => atualizarHidden());
+            </script>
+        </body>
+        </html>
+        """
+        return Response(html_2fa, status=200, mimetype="text/html")
+
+    # POST: Valida os 6 dígitos do código 2FA enviado
+    codigo = request.form.get("codigo") or (request.get_json(silent=True) or {}).get("codigo") or ""
+    resultado = validar_e_consumir_token_mobile(token=token, codigo_2fa=codigo)
+
+    if not resultado.get("sucesso"):
+        html_negado = f"""
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Código 2FA Inválido - FinanceControl</title>
+            <style>
+                body {{ background:#0b1320; color:#f8fafc; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:20px; text-align:center; }}
+                .box {{ background:#152238; padding:28px; border-radius:14px; max-width:400px; width:100%; border:1px solid #ef4444; }}
+                a {{ display:inline-block; margin-top:16px; padding:10px 20px; background:#3b82f6; color:#fff; text-decoration:none; border-radius:8px; font-weight:600; }}
+            </style>
+        </head>
+        <body>
+            <div class="box">
+                <h2>❌ Falha na Verificação 2FA</h2>
+                <p style="color:#fca5a5;">{resultado.get('erro')}</p>
+                <a href="/api/auth/mobile-login?token={token}">Tentar Novamente</a>
             </div>
         </body>
         </html>
         """
-        return Response(html_erro, status=400, mimetype="text/html")
+        return Response(html_negado, status=401, mimetype="text/html")
 
     registrar_sessao_usuario(resultado["usuario"])
     return redirect("/pages/assistente.html?origem=qrcode")
-
 
 # ==================== ROTAS DE RECEITAS FIXAS E DESPESAS FIXAS ====================
 
@@ -752,7 +874,7 @@ def api_tetos_gastos():
     if not categoria or valor_teto <= 0:
         return jsonify({"sucesso": False, "erro": "Informe a categoria/item e um limite maior que zero."}), 400
 
-    res = definir_teto_gasto(user_id, categoria, valor_teto)
+    res = salvar_teto_gasto(user_id, categoria, valor_teto)
     res["tetos"] = listar_tetos_gastos(user_id)
     res["resumo"] = obter_resumo_financeiro(user_id)
     return jsonify(res), (200 if res.get("sucesso") else 400)
@@ -783,13 +905,191 @@ def webhook_telegram():
     res = processar_update_telegram(update)
     return jsonify(res), 200
 
+@app.route("/api/configuracoes/alterar-senha", methods=["POST"])
+@login_obrigatorio
+def api_alterar_senha_logado():
+    user_id = session.get("user_id") or session.get("usuario_id")
+    dados = request.get_json(silent=True) or {}
+    
+    senha_atual = (dados.get("senha_atual") or "").strip()
+    nova_senha = (dados.get("nova_senha") or "").strip()
+    confirmar_senha = (dados.get("confirmar_senha") or nova_senha).strip()
+
+    if not senha_atual:
+        return jsonify({"sucesso": False, "erro": "Digite sua senha atual."}), 400
+    if len(nova_senha) < 6:
+        return jsonify({"sucesso": False, "erro": "A nova senha deve ter no mínimo 6 dígitos."}), 400
+    if nova_senha != confirmar_senha:
+        return jsonify({"sucesso": False, "erro": "A confirmação de senha não coincide."}), 400
+
+    db = SessionLocal()
+    try:
+        # Usando instrução SQL direta evita o erro "name 'Usuario' is not defined"
+        user = db.execute(
+            text("SELECT id, senha_hash FROM usuarios WHERE id = :uid"), 
+            {"uid": user_id}
+        ).fetchone()
+        
+        if not user:
+            return jsonify({"sucesso": False, "erro": "Usuário não encontrado."}), 404
+
+        hash_atual = user.senha_hash or ""
+        
+        # Validação segura da senha atual
+        if hash_atual.startswith(("pbkdf2:", "scrypt:", "sha256")):
+            senha_correta = check_password_hash(hash_atual, senha_atual)
+        else:
+            senha_correta = (hash_atual == senha_atual)
+
+        if not senha_correta:
+            return jsonify({"sucesso": False, "erro": "A senha atual informada está incorreta."}), 401
+
+        # Gera e atualiza a nova senha
+        novo_hash = generate_password_hash(nova_senha, method="pbkdf2:sha256", salt_length=16)
+        db.execute(
+            text("UPDATE usuarios SET senha_hash = :sh, atualizado_em = CURRENT_TIMESTAMP WHERE id = :uid"),
+            {"sh": novo_hash, "uid": user_id}
+        )
+        db.commit()
+        
+        return jsonify({"sucesso": True, "mensagem": "Senha alterada com sucesso! 🔒"}), 200
+    except Exception as e:
+        db.rollback()
+        return jsonify({"sucesso": False, "erro": f"Erro ao atualizar senha: {str(e)}"}), 500
+    finally:
+        db.close()
+
+
+# =========================================================================
+# 2. CORREÇÃO DO ERRO 404 (Rota de Perfil unificada para carregar/salvar)
+# =========================================================================
+@app.route("/api/configuracoes", methods=["GET", "POST", "PUT"])
+@app.route("/api/auth/perfil", methods=["GET", "POST", "PUT"])
+@login_obrigatorio
+def api_configuracoes_perfil():
+    user_id = session.get("user_id") or session.get("usuario_id")
+    db = SessionLocal()
+    
+    try:
+        # --- CARREGAR DADOS DO PERFIL (GET) ---
+        if request.method == "GET":
+            user = db.execute(
+                text("""
+                    SELECT id, nome, email, telegram_username, telegram_id, telegram_chat_id 
+                    FROM usuarios WHERE id = :uid
+                """),
+                {"uid": user_id}
+            ).fetchone()
+            
+            if not user:
+                return jsonify({"sucesso": False, "erro": "Usuário não encontrado"}), 404
+                
+            tg_user = user.telegram_username or ""
+            if tg_user and not tg_user.startswith("@"):
+                tg_user = "@" + tg_user
+                
+            return jsonify({
+                "sucesso": True,
+                "usuario": {
+                    "id": user.id,
+                    "nome": user.nome,
+                    "email": user.email,
+                    "telegram_username": tg_user,
+                    "telegram_chat_id": user.telegram_chat_id or user.telegram_id or ""
+                }
+            }), 200
+
+        # --- ATUALIZAR DADOS DO PERFIL (POST/PUT) ---
+        dados = request.get_json(silent=True) or {}
+        nome = (dados.get("nome") or "").strip()
+        telegram_username = (dados.get("telegram_username") or "").strip()
+        telegram_chat_id = (dados.get("telegram_chat_id") or dados.get("chat_id") or dados.get("telegram_id") or "").strip()
+        
+        if telegram_username and not telegram_username.startswith(("@", "+")):
+            telegram_username = "@" + telegram_username
+            
+        db.execute(
+            text("""
+                UPDATE usuarios 
+                SET nome = :nome, 
+                    telegram_username = :tg_user, 
+                    telegram_id = :tg_id, 
+                    telegram_chat_id = :tg_id,
+                    atualizado_em = CURRENT_TIMESTAMP
+                WHERE id = :uid
+            """),
+            {
+                "nome": nome,
+                "tg_user": telegram_username or None,
+                "tg_id": telegram_chat_id or None,
+                "uid": user_id
+            }
+        )
+        db.commit()
+        
+        # Atualiza o nome armazenado no cache da sessão
+        session["user_nome"] = nome
+        session.modified = True
+        
+        return jsonify({"sucesso": True, "mensagem": "Configurações atualizadas com sucesso!"}), 200
+        
+    except Exception as e:
+        db.rollback()
+        return jsonify({"sucesso": False, "erro": str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/configuracoes/alerta-teto", methods=["POST"])
+@login_obrigatorio
+def api_configurar_alerta_teto():
+    user_id = session.get("user_id")
+    dados = request.get_json(silent=True) or {}
+    percentual = float(dados.get("percentual") or 80)
+    chat_id = str(dados.get("chat_id") or "").strip()
+
+    session["alerta_teto"] = int(percentual)
+    alertas_ativos = []
+    notificado_telegram = False
+
+    try:
+        from core.database import listar_tetos_gastos
+        tetos = listar_tetos_gastos(user_id) or []
+        for t in tetos:
+            perc_atual = float(t.get("percentual") or 0)
+            if perc_atual >= percentual:
+                alertas_ativos.append({
+                    "categoria": t.get("categoria"),
+                    "percentual": perc_atual,
+                    "gasto_atual": t.get("gasto_atual"),
+                    "valor_teto": t.get("valor_teto")
+                })
+
+        if alertas_ativos and chat_id:
+            linhas = [f"• *{a['categoria']}*: {a['percentual']:.1f}% consumido" for a in alertas_ativos]
+            msg_alerta = (
+                f"⚠️ *Alerta Preventivo de Teto ({int(percentual)}%)*\n\n"
+                f"As seguintes categorias já atingiram ou ultrapassaram seu limite de alerta:\n"
+                + "\n".join(linhas)
+            )
+            notificado_telegram = enviar_mensagem_telegram(chat_id, msg_alerta)
+    except Exception:
+        pass
+
+    return jsonify({
+        "sucesso": True,
+        "percentual": int(percentual),
+        "alertas_ativos": alertas_ativos,
+        "notificado_telegram": notificado_telegram
+    }), 200
+
 
 if __name__ == "__main__":
     porta = int(os.getenv("PORT", 5001))
     ip_rede = obter_ip_rede_local()
     print("=" * 65)
-    print(f"🚀 SERVIDOR FINANCECONTROL RODANDO COM SUCESSO!")
+    print("🚀 SERVIDOR FINANCECONTROL RODANDO COM SEGURANÇA LGPD (RNF06)!")
     print(f"💻 Acesso no Computador: http://127.0.0.1:{porta}")
     print(f"📱 Acesso no Celular (Wi-Fi): http://{ip_rede}:{porta}")
     print("=" * 65)
-    app.run(host="0.0.0.0", port=porta, debug=True)
+    app.run(host="0.0.0.0", port=porta, debug=True, use_reloader=False)

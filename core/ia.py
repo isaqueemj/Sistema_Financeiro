@@ -30,7 +30,7 @@ from core.database import (
     listar_rendas_fixas,
     criar_gasto_fixo,
     listar_gastos_fixos,
-    definir_teto_gasto,
+    salvar_teto_gasto,
     listar_tetos_gastos,
     excluir_teto_gasto
 )
@@ -887,7 +887,7 @@ def _executar_acao_estruturada(usuario_id: int, texto_original: str, dados: dict
             "graficos": {
                 "pizza": novo_resumo["grafico_pizza"],
                 "colunas": novo_resumo["grafico_colunas"],
-                "evolucao": novo_resumo["grafico_evolucao"]
+                # "evolucao": novo_resumo["grafico_evolucao"]
             },
             "resposta": (
                 "📈 *Aqui está o resumo visual das suas finanças!*\n"
