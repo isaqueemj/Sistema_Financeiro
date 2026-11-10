@@ -5,12 +5,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FinanceControl - Configurações</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
     <link rel="stylesheet" href="/css/configuracoes.css">
 </head>
 <body>
     <div class="app-layout">
+        <!-- Menu Lateral (Sidebar Fixa com Botão Sair Sempre Visível) -->
         <aside class="sidebar">
-            <div class="brand">FinanceControl</div>
+            <div class="brand">
+                <span class="brand-icon">💎</span> FinanceControl
+            </div>
             <nav class="nav-menu">
                 <a href="/pages/dashboard.html" class="nav-item">
                     <span>📊</span> Dashboard
@@ -32,23 +36,25 @@
                 </a>
             </nav>
             <div class="sidebar-footer">
-                <button id="btn-logout" class="btn-logout">Sair da Conta</button>
+                <button id="btn-logout" class="btn-logout" type="button">Sair da Conta</button>
             </div>
         </aside>
 
+        <!-- Conteúdo Principal -->
         <main class="main-content">
             <header class="page-header">
                 <div>
                     <h1>Configurações e Integração Telegram</h1>
-                    <p>Vincule sua conta ao Bot do Telegram ou continue a conversa no smartphone via QR Code</p>
+                    <p>Vincule sua conta ao Bot do Telegram, gerencie sua segurança e exporte seus dados financeiros</p>
                 </div>
-                <div class="user-greeting" id="header-user-name">Olá, Usuário</div>
+                    <span class="user-greeting" id="dash-user-name">Olá, Usuário</span>
             </header>
 
+            <!-- LINHA 1: Cards Principais (Telegram/QR Code + Perfil) -->
             <div class="settings-grid">
-                <!-- Card 1: QR Code e Vínculo com Telegram -->
+                <!-- Card 1: Integração Telegram & Mobile -->
                 <section class="settings-card highlight-card">
-                    <div class="card-badge">Integração Telegram & Mobile</div>
+                    <div class="card-badge">Integração Telegram &amp; Mobile</div>
                     <h2>✈️ Conversar no Telegram / Celular</h2>
                     <p class="card-desc">
                         Escaneie o QR Code para vincular sua conta diretamente ao nosso Bot no Telegram e cadastrar rendas fixas, gastos fixos ou consultar seu saldo pelo celular.
@@ -60,12 +66,18 @@
                         <div class="feature-item">✅ Sem necessidade de informar número de telefone</div>
                     </div>
 
-                    <button id="btn-abrir-qrcode" class="btn-primary-qr">
-                        <span>📷</span> Gerar QR Code (Telegram / Mobile)
-                    </button>
+                    <div class="qr-actions-stack">
+                        <button id="btn-abrir-qrcode" class="btn-primary-qr" type="button">
+                            <span>📱</span> Gerar QR Code (Telegram / Mobile)
+                        </button>
+                        <button id="btn-testar-telegram" class="btn-secondary-action" type="button">
+                            <span>🔔</span> Enviar Mensagem de Teste no Meu Telegram
+                        </button>
+                    </div>
+                    <div id="telegram-test-alert" class="alert-box" style="margin-top: 0.85rem; margin-bottom: 0;"></div>
                 </section>
 
-                <!-- Card 2: Dados do Perfil (Sem Telefone) -->
+                <!-- Card 2: Dados do Perfil e Vínculo Telegram -->
                 <section class="settings-card">
                     <h2>👤 Dados do Perfil e Vínculo Telegram</h2>
                     <p class="card-desc">Gerencie seu nome e sua identificação exclusiva do Telegram (RN03).</p>
@@ -93,32 +105,123 @@
                     </form>
                 </section>
             </div>
+
+            <!-- LINHA 2: Segurança (Alterar Senha) + Relatórios e Ferramentas -->
+            <div class="settings-grid" style="margin-top: 1.75rem;">
+                <!-- Card 3: Segurança da Conta e Alteração de Senha -->
+                <section class="settings-card">
+                    <div class="card-badge badge-security">Segurança &amp; LGPD (RNF06)</div>
+                    <h2>🔒 Alterar Senha de Acesso</h2>
+                    <p class="card-desc">
+                        Atualize sua senha periodicamente. Sua credencial é armazenada com hash criptográfico seguro.
+                    </p>
+
+                    <div id="senha-alert" class="alert-box"></div>
+
+                    <form id="form-alterar-senha">
+                        <div class="form-group">
+                            <label for="senha-atual">Senha Atual</label>
+                            <input type="password" id="senha-atual" required placeholder="Digite sua senha atual">
+                        </div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label for="nova-senha">Nova Senha (mín. 6 dígitos)</label>
+                                <input type="password" id="nova-senha" required minlength="6" placeholder="••••••••">
+                            </div>
+                            <div class="form-group">
+                                <label for="confirmar-nova-senha">Confirmar Nova Senha</label>
+                                <input type="password" id="confirmar-nova-senha" required minlength="6" placeholder="••••••••">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-primary-qr" id="btn-salvar-senha">
+                            🔑 Atualizar Minha Senha
+                        </button>
+                    </form>
+                </section>
+
+                <!-- Card 4: Preferências de Alerta, Exportação de Dados e Manutenção -->
+                <section class="settings-card">
+                    <div class="card-badge badge-tools">Relatórios &amp; Controle</div>
+                    <h2>📦 Exportação de Dados e Alertas Inteligentes</h2>
+                    <p class="card-desc">
+                        Configure o gatilho de avisos de orçamento (RN02), baixe seus relatórios ou limpe o histórico do chat.
+                    </p>
+
+                    <div id="tools-alert" class="alert-box"></div>
+
+                    <!-- Preferência de Limiar de Alerta -->
+                    <div class="preference-box">
+                        <div class="pref-header">
+                            <div>
+                                <strong>⚠️ Alerta Preventivo de Teto de Gastos</strong>
+                                <span>Avisar quando o consumo da categoria atingir:</span>
+                            </div>
+                            <select id="select-limiar-alerta" class="select-pref">
+                                <option value="70">70% do Teto</option>
+                                <option value="80" selected>80% do Teto (Padrão)</option>
+                                <option value="90">90% do Teto</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Exportação de Dados (CSV e JSON) -->
+                    <div class="export-section">
+                        <label class="section-mini-label">Exportar Histórico e Planejamento (Portabilidade)</label>
+                        <div class="export-buttons-grid">
+                            <button type="button" id="btn-exportar-csv" class="btn-tool-export">
+                                📊 Baixar Planilha (.CSV / Excel)
+                            </button>
+                            <button type="button" id="btn-exportar-json" class="btn-tool-export">
+                                🗂️ Backup Completo (.JSON)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Zona de Manutenção Rápida (Sem opção de apagar conta) -->
+                    <div class="danger-zone-box">
+                        <label class="section-mini-label text-amber">Manutenção do Chat</label>
+                        <div class="export-buttons-grid" style="grid-template-columns: 1fr;">
+                            <button type="button" id="btn-limpar-chat" class="btn-tool-danger-outline">
+                                🧹 Limpar Histórico de Conversas da IA
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
         </main>
     </div>
 
-    <!-- Modal QR Code -->
+    <!-- Modal do QR Code Dinâmico -->
     <div id="modal-qrcode" class="modal-overlay" aria-hidden="true">
         <div class="modal-container">
             <button id="btn-fechar-modal" class="modal-close" title="Fechar">&times;</button>
 
             <div class="modal-header">
-                <h3>✈️ Conectar ao Bot do Telegram</h3>
-                <p>Aponte a câmera do celular para abrir o Bot no Telegram já vinculado à sua conta ou continuar pelo navegador.</p>
+                <h3>📱 Continuar no Smartphone</h3>
+                <p>Aponte a câmera do seu celular para o QR Code abaixo para abrir o Bot do Telegram ou acessar via Web Mobile.</p>
             </div>
 
             <div class="qr-mode-tabs">
                 <button type="button" id="tab-qr-tg" class="qr-tab active">Abrir Bot no Telegram</button>
-                <button type="button" id="tab-qr-web" class="qr-tab">Chat Web Mobile</button>
+                <button type="button" id="tab-qr-web" class="qr-tab">Painel Web Mobile</button>
             </div>
 
             <div class="qr-display-box">
-                <div id="qr-loading" class="qr-loading">Gerando QR Code...</div>
-                <img id="qr-image" src="" alt="QR Code" style="display: none;">
+                <div id="qr-loading" class="qr-loading">Gerando QR Code seguro...</div>
+                <img id="qr-image" src="" alt="QR Code para continuar no celular" style="display: none;">
             </div>
 
             <div class="qr-timer-bar">
                 <span>⏱️ Token expira em: <strong id="qr-countdown">10:00</strong></span>
                 <button type="button" id="btn-renovar-qr" class="btn-link-refresh">🔄 Gerar novo</button>
+            </div>
+
+            <div class="qr-instructions">
+                <ol>
+                    <li>Abra a <strong>Câmera</strong> do seu celular e aponte para o código acima.</li>
+                    <li>No modo <strong>Telegram</strong>, toque em <em>Começar (Start)</em> para vincular automaticamente.</li>
+                    <li>No modo <strong>Web Mobile</strong>, sua sessão abrirá logada instantaneamente.</li>
+                </ol>
             </div>
 
             <div class="qr-copy-section">

@@ -1,6 +1,7 @@
 // Caminho: web/js/dashboard.js
 let instanciaChartPizza = null;
 let instanciaChartColunas = null;
+let instanciaChartLinha = null;
 
 const PALETA_CORES = [
     "#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6",
@@ -72,7 +73,6 @@ async function carregarStatsDashboard(mostrarFeedbackBotao = false) {
     }
 
     try {
-        // Parâmetro _t evita qualquer cache do navegador
         const url = `/api/dashboard/stats?periodo=${encodeURIComponent(periodo)}&_t=${Date.now()}`;
         const res = await fetch(url, { cache: "no-store" });
 
@@ -97,15 +97,19 @@ async function carregarStatsDashboard(mostrarFeedbackBotao = false) {
         // 1. Atualiza Cards
         renderizarCardsValores(data.resumo);
 
-        // 2. Prepara dados garantidos para o Gráfico de Pizza
+        // 2. Gráfico de Pizza
         const dadosPizza = extrairDadosPizzaSeguros(data);
         renderizarGraficoPizza(dadosPizza);
 
-        // 3. Prepara dados garantidos para o Gráfico de Colunas
+        // 3. Gráfico de Colunas
         const dadosColunas = extrairDadosColunasSeguros(data);
         renderizarGraficoColunas(dadosColunas);
 
-        // 4. Atualiza Tabela
+        // 4. Gráfico de Linha (Evolução do Saldo com nomes das transações)
+        const dadosLinha = extrairDadosLinhaSeguros(data);
+        renderizarGraficoLinha(dadosLinha);
+
+        // 5. Atualiza Tabela
         renderizarTabelaMovimentacoes(data.transacoes || [], data.rendas_fixas || [], data.gastos_fixos || []);
 
         if (mostrarFeedbackBotao && btnRefresh) {
@@ -142,7 +146,6 @@ function extrairDadosPizzaSeguros(data) {
         };
     }
 
-    // Fallback a partir da lista de transações e gastos fixos caso o backend não tenha agrupado
     const mapa = {};
     (data.transacoes || []).forEach((t) => {
         if (t.tipo === "despesa") {
@@ -182,6 +185,79 @@ function extrairDadosColunasSeguros(data) {
         labels: [resumo.mes_referencia || "Mês Vigente"],
         entradas: [Number(resumo.total_receitas || 0)],
         saidas: [Number(resumo.total_despesas || 0)]
+    };
+}
+
+function extrairDadosLinhaSeguros(data) {
+    const resumo = data.resumo || {};
+    const transacoes = Array.isArray(data.transacoes) ? [...data.transacoes] : [];
+
+    // Mapa de ID -> Nome da transação para substituir qualquer "#36" pelo nome real (ex: "Mercado")
+    const mapaIdParaNome = {};
+    transacoes.forEach((t) => {
+        if (t.id != null) {
+            mapaIdParaNome[`#${t.id}`] = (t.descricao || t.categoria || `Item #${t.id}`).trim();
+        }
+    });
+
+    const totalRendasFixas = Number(
+        resumo.total_rendas_fixas ??
+        (data.rendas_fixas || []).filter((r) => r.is_active).reduce((acc, r) => acc + Number(r.amount || 0), 0)
+    );
+    const totalGastosFixos = Number(
+        resumo.total_gastos_fixos ??
+        (data.gastos_fixos || []).filter((g) => g.is_active).reduce((acc, g) => acc + Number(g.amount || 0), 0)
+    );
+
+    const baseFixa = Number((totalRendasFixas - totalGastosFixos).toFixed(2));
+
+    // Ordena as transações da mais antiga para a mais recente para traçar a evolução real do saldo
+    const transacoesOrdenadas = transacoes.sort((a, b) => {
+        const idA = Number(a.id || 0);
+        const idB = Number(b.id || 0);
+        if (idA && idB) return idA - idB;
+        return new Date(a.data_transacao || 0) - new Date(b.data_transacao || 0);
+    });
+
+    if (transacoesOrdenadas.length > 0 || baseFixa !== 0) {
+        const labels = ["Base Fixa"];
+        const saldos = [baseFixa];
+        const detalhes = [
+            `Base Fixa (Rendas Fixas - Gastos Fixos): ${formatarMoedaBRL(baseFixa)}`
+        ];
+
+        let saldoAcumulado = baseFixa;
+        transacoesOrdenadas.forEach((t) => {
+            const valor = Number(t.valor || 0);
+            const ehReceita = t.tipo === "receita";
+            saldoAcumulado = Number((saldoAcumulado + (ehReceita ? valor : -valor)).toFixed(2));
+
+            const nomeTransacao = (t.descricao || t.categoria || "Movimentação").trim();
+            labels.push(nomeTransacao);
+            saldos.push(saldoAcumulado);
+            detalhes.push(
+                `${nomeTransacao} (${ehReceita ? "+" : "-"}${formatarMoedaBRL(valor)})`
+            );
+        });
+
+        return { labels, saldos, detalhes };
+    }
+
+    // Fallback caso venha do objeto grafico_evolucao do backend
+    const evolucaoBackend = data.grafico_evolucao || resumo.grafico_evolucao || data.graficos?.evolucao;
+    if (evolucaoBackend && Array.isArray(evolucaoBackend.labels) && evolucaoBackend.labels.length > 0) {
+        const labelsConvertidas = evolucaoBackend.labels.map((lbl) => mapaIdParaNome[lbl] || lbl);
+        return {
+            labels: labelsConvertidas,
+            saldos: (evolucaoBackend.saldos || []).map(Number),
+            detalhes: labelsConvertidas
+        };
+    }
+
+    return {
+        labels: ["Saldo Atual"],
+        saldos: [Number(resumo.saldo || 0)],
+        detalhes: [`Saldo Atual: ${formatarMoedaBRL(resumo.saldo || 0)}`]
     };
 }
 
@@ -245,7 +321,6 @@ function renderizarGraficoPizza(dadosPizza) {
 
     if (msgVazio) msgVazio.style.display = "none";
 
-    // Se Chart.js estiver disponível, usa Chart.js; caso contrário, usa o renderizador SVG nativo
     if (typeof Chart !== "undefined" && canvas) {
         if (fallbackDiv) fallbackDiv.style.display = "none";
         canvas.style.display = "block";
@@ -383,6 +458,110 @@ function renderizarGraficoColunas(dadosColunas) {
     }
 }
 
+function renderizarGraficoLinha(dadosLinha) {
+    const canvas = document.getElementById("chart-linha-tendencia");
+    const fallbackDiv = document.getElementById("fallback-linha");
+    const msgVazio = document.getElementById("linha-empty");
+
+    const labels = dadosLinha.labels || [];
+    const saldos = dadosLinha.saldos || [];
+    const detalhes = dadosLinha.detalhes || [];
+
+    if (labels.length === 0 || saldos.length === 0) {
+        if (canvas) canvas.style.display = "none";
+        if (fallbackDiv) fallbackDiv.style.display = "none";
+        if (msgVazio) msgVazio.style.display = "block";
+        if (instanciaChartLinha) {
+            instanciaChartLinha.destroy();
+            instanciaChartLinha = null;
+        }
+        return;
+    }
+
+    if (msgVazio) msgVazio.style.display = "none";
+
+    if (typeof Chart !== "undefined" && canvas) {
+        if (fallbackDiv) fallbackDiv.style.display = "none";
+        canvas.style.display = "block";
+
+        if (instanciaChartLinha) {
+            instanciaChartLinha.data.labels = labels;
+            instanciaChartLinha.data.datasets[0].data = saldos;
+            instanciaChartLinha.options.plugins.tooltip.detalhes = detalhes;
+            instanciaChartLinha.update();
+            return;
+        }
+
+        const ctx = canvas.getContext("2d");
+        instanciaChartLinha = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: "Saldo (R$)",
+                    data: saldos,
+                    borderColor: "#3b82f6",
+                    backgroundColor: "rgba(59, 130, 246, 0.22)",
+                    borderWidth: 2.5,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: "#152238",
+                    pointBorderColor: "#3b82f6",
+                    pointBorderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: "top",
+                        labels: {
+                            color: "#f8fafc",
+                            font: { size: 12 }
+                        }
+                    },
+                    tooltip: {
+                        detalhes: detalhes,
+                        callbacks: {
+                            title: function(context) {
+                                const idx = context[0]?.dataIndex ?? 0;
+                                const listaDet = context[0]?.chart?.options?.plugins?.tooltip?.detalhes || [];
+                                return listaDet[idx] || context[0]?.label || "";
+                            },
+                            label: function(context) {
+                                const val = context.parsed.y || 0;
+                                return ` Saldo Acumulado: ${formatarMoedaBRL(val)}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: "#cbd5e1" },
+                        grid: { color: "rgba(148, 163, 184, 0.08)" }
+                    },
+                    y: {
+                        ticks: {
+                            color: "#cbd5e1",
+                            callback: function(value) {
+                                return Number(value).toLocaleString("pt-BR");
+                            }
+                        },
+                        grid: { color: "rgba(148, 163, 184, 0.1)" }
+                    }
+                }
+            }
+        });
+    } else if (fallbackDiv) {
+        if (canvas) canvas.style.display = "none";
+        fallbackDiv.style.display = "flex";
+        desenharLinhaSVGNativo(fallbackDiv, labels, saldos);
+    }
+}
+
 /* ==================== RENDERIZADORES NATIVOS SVG (FALLBACK SEM CDN) ==================== */
 
 function desenharPizzaSVGNativo(container, labels, valores, totalGeral) {
@@ -457,6 +636,41 @@ function desenharColunasSVGNativo(container, labels, entradas, saidas) {
                 ${colunasHtml}
             </div>
         </div>
+    `;
+}
+
+function desenharLinhaSVGNativo(container, labels, saldos) {
+    const largura = 700;
+    const altura = 200;
+    const padX = 45;
+    const padY = 25;
+
+    const minVal = Math.min(...saldos);
+    const maxVal = Math.max(...saldos);
+    const amplitude = maxVal - minVal || 1;
+
+    const pontos = saldos.map((val, idx) => {
+        const x = padX + (labels.length > 1 ? (idx / (labels.length - 1)) * (largura - padX * 2) : (largura / 2));
+        const y = altura - padY - ((val - minVal) / amplitude) * (altura - padY * 2);
+        return { x, y, val, label: labels[idx] };
+    });
+
+    const caminhoLinha = pontos.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+    const caminhoArea = `${caminhoLinha} L ${pontos[pontos.length - 1].x.toFixed(1)} ${altura - padY} L ${pontos[0].x.toFixed(1)} ${altura - padY} Z`;
+
+    const circulosHtml = pontos.map((p) => `
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" fill="#152238" stroke="#3b82f6" stroke-width="2.5">
+            <title>${p.label}: ${formatarMoedaBRL(p.val)}</title>
+        </circle>
+        <text x="${p.x.toFixed(1)}" y="${altura - 6}" fill="#cbd5e1" font-size="11" text-anchor="middle">${p.label}</text>
+    `).join("");
+
+    container.innerHTML = `
+        <svg viewBox="0 0 ${largura} ${altura}" style="width:100%; height:100%; overflow:visible;">
+            <path d="${caminhoArea}" fill="rgba(59, 130, 246, 0.22)"></path>
+            <path d="${caminhoLinha}" fill="none" stroke="#3b82f6" stroke-width="2.5"></path>
+            ${circulosHtml}
+        </svg>
     `;
 }
 

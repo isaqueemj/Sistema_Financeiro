@@ -34,12 +34,20 @@ body {
 
 .sidebar {
     width: 255px;
-    background-color: var(--bg-sidebar);
-    border-right: 1px solid var(--border-color);
+    background-color: var(--bg-sidebar, #111c2d);
+    border-right: 1px solid var(--border-color, #1e293b);
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
     padding: 1.5rem 1rem;
     flex-shrink: 0;
+    /* Mantém a barra lateral travada na altura da tela enquanto a página rola */
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    max-height: 100vh;
+    overflow-y: auto;
+    z-index: 100;
 }
 
 .brand {
@@ -58,6 +66,8 @@ body {
     flex-direction: column;
     gap: 0.45rem;
     flex: 1;
+    overflow-y: auto;
+    padding-right: 0.2rem;
 }
 
 .nav-item {
@@ -84,8 +94,13 @@ body {
 }
 
 .sidebar-footer {
+    margin-top: auto;
     padding-top: 1rem;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border-color, #1e293b);
+    background-color: var(--bg-sidebar, #111c2d);
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
 }
 
 .btn-logout {
@@ -238,12 +253,16 @@ body {
     border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Gráficos - Container corrigido com display: block */
+/* Gráficos */
 .charts-grid {
     display: grid;
     grid-template-columns: 1.25fr 1fr;
     gap: 1.5rem;
     margin-bottom: 1.8rem;
+}
+
+.chart-card-linha {
+    grid-column: 1 / -1;
 }
 
 .panel-card {
@@ -252,6 +271,7 @@ body {
     border-radius: 14px;
     padding: 1.5rem;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+    min-width: 0;
 }
 
 .panel-card h2 {
@@ -271,6 +291,10 @@ body {
     height: 300px;
     width: 100%;
     margin-top: 1rem;
+}
+
+.chart-card-linha .chart-wrapper {
+    height: 270px;
 }
 
 .chart-wrapper canvas {
