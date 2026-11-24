@@ -937,7 +937,7 @@ def _executar_acao_estruturada(usuario_id: int, texto_original: str, dados: dict
         alvo_teto = dados.get("termo_busca") or categoria
         if _normalizar(alvo_teto) in ("outros", "teto", "limite", ""):
             alvo_teto = inferir_categoria(texto_original)
-        res_teto = definir_teto_gasto(usuario_id, alvo_teto, float(valor))
+        res_teto = salvar_teto_gasto(usuario_id, alvo_teto, float(valor))
         novo_resumo = obter_resumo_financeiro(usuario_id)
         alerta = verificar_alerta_teto_categoria(usuario_id, alvo_teto)
         return {

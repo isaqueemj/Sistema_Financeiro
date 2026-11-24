@@ -31,7 +31,6 @@ from core.database import (
     validar_e_consumir_token_mobile,
     salvar_mensagem_historico,
     listar_historico_mensagens,
-    obter_ou_criar_usuario_por_whatsapp,
     registrar_transacao,
     listar_transacoes,
     excluir_transacao,

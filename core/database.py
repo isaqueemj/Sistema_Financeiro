@@ -610,8 +610,10 @@ def gerar_token_mobile(usuario_id: int, minutos_validade: int = 10) -> dict:
 
 def iniciar_2fa_leitura_qrcode(token: str, chat_id_telegram: str = None) -> dict:
     """
-    Acionado quando o QR Code é lido (no Telegram ou no navegador do celular).
-    Salva um código de 6 dígitos em `usuarios.codigo_2fa` e registra a pendência para o chat_id.
+    Acionado quando o QR Code é lido:
+    1. Desvincula imediatamente o `chat_id` no banco para revogar qualquer acesso prévio.
+    2. Gera o código de 6 dígitos em `usuarios.codigo_2fa`.
+    3. Trava o `chat_id` em estado `2FA_TG:` até que os 6 dígitos corretos sejam informados.
     """
     token_limpo = (token or "").strip()
     if not token_limpo:
@@ -637,7 +639,17 @@ def iniciar_2fa_leitura_qrcode(token: str, chat_id_telegram: str = None) -> dict
             chat_id_str = str(chat_id_telegram).strip()
             _PENDENCIAS_2FA_TELEGRAM[chat_id_str] = dono.id
 
-            # Também grava um registro de pendência no banco
+            # Revoga imediatamente qualquer vínculo anterior deste chat_id até que passe no 2FA!
+            db.execute(
+                text("""
+                    UPDATE usuarios
+                    SET telegram_id = NULL, telegram_chat_id = NULL
+                    WHERE telegram_id = :cid OR telegram_chat_id = :cid
+                """),
+                {"cid": chat_id_str}
+            )
+
+            # Registra a trava de 2FA no banco para este chat_id
             token_pendencia = f"2FA_TG:{chat_id_str}:{dono.id}"
             db.query(TokenMobile).filter(
                 TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
@@ -659,8 +671,8 @@ def iniciar_2fa_leitura_qrcode(token: str, chat_id_telegram: str = None) -> dict
     finally:
         db.close()
 
-
 def verificar_pendencia_2fa_telegram(chat_id: str) -> bool:
+    """Retorna True se este chat_id escaneou um QR Code e ainda não validou o código 2FA."""
     chat_id_str = str(chat_id).strip()
     if chat_id_str in _PENDENCIAS_2FA_TELEGRAM:
         return True
@@ -669,58 +681,51 @@ def verificar_pendencia_2fa_telegram(chat_id: str) -> bool:
         reg = db.query(TokenMobile).filter(
             TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
         ).first()
-        return reg is not None
+        if reg:
+            _PENDENCIAS_2FA_TELEGRAM[chat_id_str] = reg.usuario_id
+            return True
+        return False
     finally:
         db.close()
 
 
 def confirmar_codigo_2fa_telegram(chat_id: str, codigo_digitado: str, username: str = "") -> dict:
     """
-    Confirma os 6 dígitos enviados no chat do Telegram:
-    - Procura o usuário pela pendência do chat_id OU diretamente pelo `codigo_2fa` na tabela `usuarios`.
-    - Limpa duplicidades de `telegram_id` e `telegram_username` em outras linhas antes de salvar (evita erro 1062).
-    - Remove a pendência de 2FA para destravar o chat imediatamente.
+    Valida estritamente o código 2FA de 6 dígitos para o `chat_id` que escaneou o QR Code.
+    Se o código estiver incorreto, mantém o bloqueio ativo e recusa o acesso.
     """
     chat_id_str = str(chat_id).strip()
     codigo_limpo = re.sub(r"\D", "", str(codigo_digitado or ""))
     user_arroba = normalizar_username_telegram(username)
 
     if len(codigo_limpo) != 6:
-        return {"sucesso": False, "erro": "O código deve conter 6 dígitos numéricos."}
+        return {
+            "sucesso": False,
+            "erro": "❌ O código deve conter exatamente 6 dígitos numéricos. O acesso permanece bloqueado."
+        }
 
     agora = datetime.utcnow()
     db = SessionLocal()
     try:
-        dono = None
-
-        # 1. Tenta localizar pelo usuário associado à pendência deste chat_id
         uid_pendente = _PENDENCIAS_2FA_TELEGRAM.get(chat_id_str)
+        reg_pend = db.query(TokenMobile).filter(
+            TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
+        ).first()
+
+        if reg_pend and not uid_pendente:
+            uid_pendente = reg_pend.usuario_id
+
         if not uid_pendente:
-            reg_pend = db.query(TokenMobile).filter(
-                TokenMobile.token.like(f"2FA_TG:{chat_id_str}:%")
-            ).first()
-            if reg_pend:
-                uid_pendente = reg_pend.usuario_id
+            return {
+                "sucesso": False,
+                "erro": "❌ Nenhuma solicitação de QR Code pendente para este chat. Escaneie o QR Code novamente."
+            }
 
-        if uid_pendente:
-            dono = db.query(Usuario).filter(Usuario.id == int(uid_pendente)).first()
-
-        # 2. Fallback direto: busca qualquer usuário na tabela `usuarios` que esteja com este `codigo_2fa` ativo
-        if not dono or str(dono.codigo_2fa or "").strip() != codigo_limpo:
-            dono_por_codigo = db.query(Usuario).filter(Usuario.codigo_2fa == codigo_limpo).first()
-            if dono_por_codigo:
-                dono = dono_por_codigo
-
+        dono = db.query(Usuario).filter(Usuario.id == int(uid_pendente)).first()
         if not dono or not dono.codigo_2fa:
             return {
                 "sucesso": False,
-                "erro": "❌ Nenhum código 2FA ativo encontrado. Gere e escaneie o QR Code novamente."
-            }
-
-        if str(dono.codigo_2fa).strip() != codigo_limpo:
-            return {
-                "sucesso": False,
-                "erro": "❌ Código de 6 dígitos incorreto! Confira o número mais recente enviado ao seu e-mail."
+                "erro": "❌ Código 2FA expirado ou inexistente. Gere e escaneie um novo QR Code no painel web."
             }
 
         if dono.expiracao_2fa and dono.expiracao_2fa < agora:
@@ -732,10 +737,17 @@ def confirmar_codigo_2fa_telegram(chat_id: str, codigo_digitado: str, username: 
             db.commit()
             return {
                 "sucesso": False,
-                "erro": "⏰ Este código de 6 dígitos expirou. Escaneie o QR Code novamente."
+                "erro": "⏰ Este código de 6 dígitos expirou. Gere e escaneie um novo QR Code no sistema."
             }
 
-        # 3. Limpa `telegram_id`, `telegram_chat_id` e `telegram_username` de outras linhas para evitar IntegrityError (UNIQUE)
+        # Comparação estrita: se errar o código, NÃO libera e mantém a trava ativa!
+        if str(dono.codigo_2fa).strip() != codigo_limpo:
+            return {
+                "sucesso": False,
+                "erro": "❌ *Código 2FA incorreto!* Acesso negado. Verifique os 6 dígitos enviados ao seu e-mail e tente novamente."
+            }
+
+        # Código correto: limpa duplicidades em outras linhas antes de gravar o vínculo
         db.execute(
             text("""
                 UPDATE usuarios
@@ -758,7 +770,7 @@ def confirmar_codigo_2fa_telegram(chat_id: str, codigo_digitado: str, username: 
 
         db.flush()
 
-        # 4. Vincula definitivamente a conta do titular ao Telegram atual e limpa a trava de 2FA
+        # Grava o vínculo autenticado e remove a trava de 2FA
         dono.telegram_id = chat_id_str
         dono.telegram_chat_id = chat_id_str
         if user_arroba:
@@ -849,17 +861,25 @@ def obter_ou_vincular_usuario_telegram(
     token_vinculo: str = None
 ) -> dict:
     """
-    Retorna o usuário vinculado ao `chat_id` atual.
-    Se o usuário já cadastrou seu `@telegram_username` ou `telegram_id` no painel Web,
-    reconhece a conta automaticamente.
+    Autentica o chat_id SOMENTE se:
+    1. Não houver nenhuma pendência de 2FA aberta para este chat_id.
+    2. O `telegram_id` / `telegram_chat_id` já tiver sido validado com sucesso na tabela `usuarios`.
+    (Removido o auto-vínculo por @username sem 2FA que permitia burlar a verificação).
     """
     chat_id_str = str(chat_id).strip()
-    user_arroba = normalizar_username_telegram(username)
-    user_sem_arroba = user_arroba.lstrip("@")
+
+    # Se há 2FA pendente para este chat_id, jamais retorna autenticado!
+    if verificar_pendencia_2fa_telegram(chat_id_str):
+        return {
+            "autenticado": False,
+            "bloqueado_2fa": True,
+            "id": None,
+            "nome": first_name,
+            "email": ""
+        }
 
     db = SessionLocal()
     try:
-        # 1. Busca pelo `telegram_id` ou `telegram_chat_id` já vinculado
         user = db.execute(
             text("""
                 SELECT id, nome, email, telegram_username, telegram_id, telegram_chat_id
@@ -875,41 +895,9 @@ def obter_ou_vincular_usuario_telegram(
                 "id": user.id,
                 "nome": user.nome,
                 "email": user.email,
-                "telegram_username": user.telegram_username or user_arroba,
+                "telegram_username": user.telegram_username,
                 "telegram_id": chat_id_str
             }
-
-        # 2. Se não achou por ID, verifica se o @username do Telegram pertence a uma conta Web sem outro ID conflitante
-        if user_arroba:
-            user_por_nome = db.execute(
-                text("""
-                    SELECT id, nome, email, telegram_username, telegram_id, telegram_chat_id
-                    FROM usuarios
-                    WHERE lower(telegram_username) = :u1 OR lower(telegram_username) = :u2
-                """),
-                {"u1": user_arroba.lower(), "u2": user_sem_arroba.lower()}
-            ).fetchone()
-
-            if user_por_nome:
-                id_atual = str(user_por_nome.telegram_id or user_por_nome.telegram_chat_id or "").strip()
-                if not id_atual or id_atual == chat_id_str:
-                    db.execute(
-                        text("""
-                            UPDATE usuarios
-                            SET telegram_id = :cid, telegram_chat_id = :cid
-                            WHERE id = :uid
-                        """),
-                        {"cid": chat_id_str, "uid": user_por_nome.id}
-                    )
-                    db.commit()
-                    return {
-                        "autenticado": True,
-                        "id": user_por_nome.id,
-                        "nome": user_por_nome.nome,
-                        "email": user_por_nome.email,
-                        "telegram_username": user_arroba,
-                        "telegram_id": chat_id_str
-                    }
 
         return {
             "autenticado": False,
@@ -919,12 +907,6 @@ def obter_ou_vincular_usuario_telegram(
         }
     finally:
         db.close()
-
-
-def obter_ou_criar_usuario_por_whatsapp(telefone: str, nome: str = "Usuário WhatsApp") -> dict:
-    uid = garantir_usuario_sincronizado(1, nome=nome)
-    user = obter_usuario_por_id(uid)
-    return user or {"id": uid, "nome": nome, "email": ""}
 
 
 def obter_usuario_por_id(usuario_id: int) -> dict:
